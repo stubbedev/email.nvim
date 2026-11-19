@@ -791,3 +791,50 @@ describe("e2e: a reply puts the signature above the quoted message", function()
   state.config.accounts[1].signature = nil
   eq({}, errors)
 end)
+
+describe("e2e: quitting the full layout exits Neovim when nothing else is open, and stays otherwise", function()
+  require("email.ui.layout").close()
+  state.config.layout = "full"
+  for _, tab in ipairs(vim.api.nvim_list_tabpages()) do
+    if tab ~= vim.api.nvim_get_current_tabpage() then
+      vim.cmd.tabclose(vim.api.nvim_tabpage_get_number(tab))
+    end
+  end
+  vim.cmd.only()
+  vim.cmd.enew()
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if buf ~= vim.api.nvim_get_current_buf() and vim.bo[buf].buflisted then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end
+  local quits = 0
+  local cmd = vim.cmd
+  vim.cmd = setmetatable({
+    qall = function()
+      quits = quits + 1
+    end,
+  }, {
+    __index = cmd,
+    __call = function(_, ...)
+      return cmd(...)
+    end,
+  })
+  local function open_and_quit()
+    cmd("Email")
+    wait("list", function()
+      return state.win.list ~= nil and vim.api.nvim_win_is_valid(state.win.list) and state.busy == 0
+    end)
+    vim.api.nvim_set_current_win(state.win.list)
+    keys("q")
+  end
+  open_and_quit()
+  eq(1, quits)
+  local named = vim.fn.tempname()
+  cmd.edit(named)
+  open_and_quit()
+  eq(1, quits)
+  vim.cmd = cmd
+  vim.api.nvim_buf_delete(vim.fn.bufnr(named), { force = true })
+  state.config.layout = "float"
+  eq({}, errors)
+end)

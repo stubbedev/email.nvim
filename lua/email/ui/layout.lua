@@ -212,6 +212,26 @@ local function wipe(buf)
   end
 end
 
+local function holds_nothing_else()
+  if #vim.api.nvim_list_tabpages() > 1 or #vim.api.nvim_tabpage_list_wins(0) > 1 then
+    return false
+  end
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if
+      vim.bo[buf].buflisted
+      and (
+        vim.api.nvim_buf_get_name(buf) ~= ""
+        or vim.bo[buf].modified
+        or vim.api.nvim_buf_line_count(buf) > 1
+        or vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] ~= ""
+      )
+    then
+      return false
+    end
+  end
+  return true
+end
+
 function M.close()
   if state.closing then
     return
@@ -230,6 +250,9 @@ function M.close()
   bars = {}
   vim.api.nvim_clear_autocmds({ group = group })
   state.closing = false
+  if full() and holds_nothing_else() then
+    vim.cmd.qall()
+  end
 end
 
 local function watch()
