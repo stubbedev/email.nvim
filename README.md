@@ -97,7 +97,8 @@ An optional `signature` is added below a `-- ` line in new mail, and above the q
 `maildir`, `inbox`, `sent`, `drafts`, `archive` and `trash` are paths relative to the notmuch database root and to the
 account's maildir respectively. `addresses` decides which account a `From:` address belongs to.
 
-Then run `:Email`, `:EmailSearch <notmuch query>`, `:EmailOpen <notmuch query>` (opens the newest matching
+Then run `:Email` (it opens the first folder in the sidebar, so the first smart folder when there are any),
+`:EmailSearch <notmuch query>`, `:EmailOpen <notmuch query>` (opens the newest matching
 conversation straight away, for example `thread:0000000000003285` from a notification) or
 `:EmailCompose [address]`.
 
