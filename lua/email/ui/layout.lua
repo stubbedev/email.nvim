@@ -231,10 +231,25 @@ local function watch()
   vim.api.nvim_create_autocmd("VimResized", { group = group, callback = M.resize })
 end
 
+local function empty_tab()
+  local wins = vim.api.nvim_tabpage_list_wins(0)
+  if #wins ~= 1 then
+    return false
+  end
+  local buf = vim.api.nvim_win_get_buf(wins[1])
+  return vim.bo[buf].buftype == ""
+    and vim.api.nvim_buf_get_name(buf) == ""
+    and not vim.bo[buf].modified
+    and vim.api.nvim_buf_line_count(buf) == 1
+    and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == ""
+end
+
 function M.open()
   local sidebar, list = scratch("email-sidebar"), scratch("email-list")
   if full() then
-    vim.cmd.tabnew()
+    if not empty_tab() then
+      vim.cmd.tabnew()
+    end
     local win, placeholder = vim.api.nvim_get_current_win(), vim.api.nvim_get_current_buf()
     vim.api.nvim_win_set_buf(win, list)
     wipe(placeholder)

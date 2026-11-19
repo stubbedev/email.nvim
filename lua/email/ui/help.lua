@@ -4,7 +4,7 @@ local M = {}
 
 local CONTEXTS = { "list", "reader", "sidebar", "global", "composer" }
 
-function M.lines(keymaps, descriptions)
+function M.lines(keymaps, descriptions, pipes)
   local lines = {}
   for _, context in ipairs(CONTEXTS) do
     local rows = {}
@@ -26,11 +26,18 @@ function M.lines(keymaps, descriptions)
       end
     end
   end
+  if #pipes > 0 then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = " Pipes"
+    for _, pipe in ipairs(pipes) do
+      lines[#lines + 1] = ("   %-18s %s"):format(format.key(pipe.key), pipe.desc)
+    end
+  end
   return lines
 end
 
-function M.open(keymaps, descriptions, border)
-  local lines = M.lines(keymaps, descriptions)
+function M.open(keymaps, descriptions, border, pipes)
+  local lines = M.lines(keymaps, descriptions, pipes)
   local width = 0
   for _, line in ipairs(lines) do
     width = math.max(width, vim.fn.strdisplaywidth(line) + 2)

@@ -94,10 +94,11 @@ The source only answers inside email.nvim's composer, on recipient headers.
 | `markdown` | `types = { "text/html", "text/calendar" }` and icons | Which content types' rendered output is Markdown (others are shown verbatim), and the `headings`, `bullets`, `quote`, `link`, `email` and `image` icons |
 | `send_cmd` | `{ "msmtp", "--read-envelope-from", "--read-recipients" }` | Reads the message on stdin |
 | `sync_cmd` | `nil` | Run by the sync key |
+| `pipes` | `{}` | Extra keys that pipe the raw message into a command, as `{ key, cmd, desc }` with `cmd` an argv list, for example `{ key = "<leader>mu", cmd = { "mail-unsubscribe" }, desc = "Unsubscribe" }`; listed in the help |
 | `page_size` | `100` | Messages per page |
 | `refresh_interval` | `5000` | ms between checks of the notmuch database for changes; `0` disables |
 | `downloads_dir` | `~/Downloads` | Where saved attachments go |
-| `layout` | `"float"` | `"float"`: a floating window over the editor. `"full"`: normal windows, like oil: the folders and list open in a tab of their own and a message opens in its own tab, titles and status in the winbar; quitting closes the tabs |
+| `layout` | `"float"` | `"float"`: a floating window over the editor. `"full"`: normal windows, like oil: the folders and list open in a tab of their own (or take over the current tab when it holds only an empty buffer, as with `nvim -c Email`) and a message opens in its own tab, titles and status in the winbar; quitting closes the tabs |
 | `border`, `width`, `height`, `sidebar_width` | `"rounded"`, `0.9`, `0.9`, `30` | Float size and border, and the folders' width in both layouts |
 | `images` | `{ enabled = false, remote = false, max_width = 80, max_height = 40 }` | Inline images through snacks.image (snacks.nvim must be installed, with its `image` module set up, when enabled); sizes are in cells; `remote` lets snacks fetch `http(s)` images, off by default because remote images are how senders track opens |
 | `devicons` | `false` | File icons for attachments from nvim-web-devicons (must be installed when `true`) |

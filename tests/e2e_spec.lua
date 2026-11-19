@@ -84,10 +84,12 @@ write(
 vim.env.NOTMUCH_CONFIG = config_path
 assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
 
-local errors = {}
+local errors, infos = {}, {}
 vim.notify = function(msg, level)
   if level == vim.log.levels.ERROR then
     errors[#errors + 1] = msg
+  elseif level == nil or level == vim.log.levels.INFO then
+    infos[#infos + 1] = msg
   end
 end
 vim.o.columns, vim.o.lines = 160, 50
@@ -113,6 +115,7 @@ require("email").setup({
     end,
   },
   images = { enabled = true, remote = true },
+  pipes = { { key = "<leader>mu", cmd = { "sh", "-c", "grep -m1 '^Subject:'" }, desc = "Show the subject" } },
   send_cmd = { "sh", "-c", 'cat > "$0"', sent_path },
   refresh_interval = 0,
 })
@@ -409,9 +412,28 @@ describe("e2e: attached photos are not drawn once the attachment list collapses"
   keys("q")
 end)
 
+describe("e2e: a pipe key sends the raw message to its command", function()
+  vim.cmd("EmailSearch id:many@example.org")
+  wait("list", function()
+    return state.busy == 0 and #state.messages == 1 and state.messages[1].id == "many@example.org"
+  end)
+  focus_row(1)
+  infos = {}
+  keys("<leader>mu")
+  wait("the pipe's output", function()
+    return #infos > 0
+  end)
+  eq("Subject: Many uploads", infos[#infos])
+  local help =
+    require("email.ui.help").lines(state.config.keymaps, require("email.actions").descriptions, state.config.pipes)
+  eq(true, vim.tbl_contains(help, ("   %-18s %s"):format("<Space>mu", "Show the subject")))
+end)
+
 describe("e2e: the full layout uses normal windows in a tab of its own", function()
   require("email.ui.layout").close()
   state.config.layout = "full"
+  vim.api.nvim_buf_set_lines(0, 0, -1, false, { "not an empty tab" })
+  vim.bo.modified = false
   local origin_tab, origin_win = vim.api.nvim_get_current_tabpage(), vim.api.nvim_get_current_win()
   vim.cmd("EmailSearch id:many@example.org")
   wait("the full layout to load the search", function()
@@ -448,6 +470,24 @@ describe("e2e: the full layout uses normal windows in a tab of its own", functio
   keys("q")
   eq(false, vim.api.nvim_tabpage_is_valid(list_tab))
   eq(true, vim.api.nvim_win_is_valid(origin_win))
+  eq({}, errors)
+  state.config.layout = "float"
+end)
+
+describe("e2e: the full layout takes over a tab that holds only an empty buffer", function()
+  state.config.layout = "full"
+  vim.cmd.tabnew()
+  local empty_tab = vim.api.nvim_get_current_tabpage()
+  local tabs = #vim.api.nvim_list_tabpages()
+  vim.cmd("Email")
+  wait("list", function()
+    return state.win.list ~= nil and vim.api.nvim_win_is_valid(state.win.list) and state.busy == 0
+  end)
+  eq(empty_tab, vim.api.nvim_win_get_tabpage(state.win.list))
+  eq(tabs, #vim.api.nvim_list_tabpages())
+  vim.api.nvim_set_current_win(state.win.list)
+  keys("q")
+  eq(tabs - 1, #vim.api.nvim_list_tabpages())
   eq({}, errors)
   state.config.layout = "float"
 end)

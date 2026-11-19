@@ -323,6 +323,15 @@ local function count_label(messages)
     or ("%d messages"):format(#messages)
 end
 
+local function pipe_to(message, cmd)
+  local res = async.system(cmd, { stdin = notmuch.raw(message.id), text = true })
+  local output = vim.trim((res.stdout or "") .. (res.stderr or ""))
+  vim.notify(
+    output ~= "" and output or ("`%s` exited %d"):format(table.concat(cmd, " "), res.code),
+    res.code == 0 and vim.log.levels.INFO or vim.log.levels.ERROR
+  )
+end
+
 local function open_composer(draft)
   composer.open(draft, { send = compose.send, save = compose.save }, state.config.keymaps.composer, state.config.border)
 end
@@ -390,7 +399,7 @@ end
 
 M.handlers = {
   help = function()
-    help.open(state.config.keymaps, M.descriptions, state.config.border)
+    help.open(state.config.keymaps, M.descriptions, state.config.border, state.config.pipes)
   end,
   compose = function()
     local account = state.folder.account and state.config.accounts[state.folder.account] or state.config.accounts[1]
@@ -524,12 +533,7 @@ M.handlers = {
     if not cmd or cmd == "" then
       return
     end
-    local res = async.system({ vim.o.shell, vim.o.shellcmdflag, cmd }, { stdin = notmuch.raw(message.id), text = true })
-    local output = vim.trim((res.stdout or "") .. (res.stderr or ""))
-    vim.notify(
-      output ~= "" and output or ("`%s` exited %d"):format(cmd, res.code),
-      res.code == 0 and vim.log.levels.INFO or vim.log.levels.ERROR
-    )
+    pipe_to(message, { vim.o.shell, vim.o.shellcmdflag, cmd })
   end,
   search = function()
     local q = async.input({ prompt = "notmuch query: ", default = state.folder.search })
@@ -649,6 +653,15 @@ function M.bind(buf, contexts)
           end, { buffer = buf, nowait = true, desc = "email: " .. M.descriptions[action] })
         end
       end
+    end
+  end
+  if vim.tbl_contains(contexts, "global") then
+    for _, pipe in ipairs(state.config.pipes) do
+      vim.keymap.set("n", pipe.key, function()
+        async.run(function()
+          pipe_to(target(), pipe.cmd)
+        end)
+      end, { buffer = buf, nowait = true, desc = "email: " .. pipe.desc })
     end
   end
 end
