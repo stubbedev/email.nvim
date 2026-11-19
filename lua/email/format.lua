@@ -1,0 +1,123 @@
+local mime = require("email.mime")
+
+local M = {}
+
+local DAYS = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
+local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
+local SENDER_WIDTH = 22
+local DATE_WIDTH = 10
+
+function M.date(ts, now)
+  local t, n = os.date("*t", ts), os.date("*t", now)
+  if t.year == n.year and t.yday == n.yday then
+    return ("%02d:%02d"):format(t.hour, t.min)
+  end
+  if ts <= now and now - ts < 6 * 86400 then
+    return ("%s %02d:%02d"):format(DAYS[t.wday], t.hour, t.min)
+  end
+  if t.year == n.year then
+    return ("%s %02d"):format(MONTHS[t.month], t.day)
+  end
+  return ("%04d-%02d-%02d"):format(t.year, t.month, t.day)
+end
+
+function M.oneline(s)
+  return vim.trim((s or ""):gsub("%s+", " "))
+end
+
+function M.fit(s, width)
+  local w = vim.fn.strdisplaywidth(s)
+  if w <= width then
+    return s .. string.rep(" ", width - w)
+  end
+  local out, used = {}, 0
+  for _, ch in ipairs(vim.fn.split(s, [[\zs]])) do
+    local cw = vim.fn.strdisplaywidth(ch)
+    if used + cw > width - 1 then
+      break
+    end
+    out[#out + 1] = ch
+    used = used + cw
+  end
+  return table.concat(out) .. "…" .. string.rep(" ", width - 1 - used)
+end
+
+function M.sender(from)
+  local first = mime.parse_addresses(from or "")[1]
+  if not first then
+    return "(unknown)"
+  end
+  return first.name or first.addr
+end
+
+function M.status_icon(tags, icons)
+  if tags.flagged then
+    return icons.flagged, "EmailFlagged"
+  end
+  if tags.unread then
+    return icons.unread, "EmailUnread"
+  end
+  if tags.replied then
+    return icons.replied, "EmailReplied"
+  end
+  return "", nil
+end
+
+local function icon_width(icons)
+  local width = 0
+  for _, icon in pairs(icons) do
+    width = math.max(width, vim.fn.strdisplaywidth(icon))
+  end
+  return width
+end
+
+function M.row(message, width, icons, now)
+  local iw = icon_width(icons)
+  local segments = {}
+  local status, status_hl = M.status_icon(message.tags, icons)
+  local unread = message.tags.unread
+  segments[#segments + 1] = { " " .. M.fit(status, iw) .. " ", status_hl }
+  segments[#segments + 1] = { M.fit(message.tags.attachment and icons.attachment or "", iw) .. " ", "EmailAttachment" }
+  segments[#segments + 1] = {
+    M.fit(M.oneline(M.sender(message.headers.From)), SENDER_WIDTH) .. "  ",
+    unread and "EmailSenderUnread" or "EmailSender",
+  }
+  local used = 0
+  for _, segment in ipairs(segments) do
+    used = used + vim.fn.strdisplaywidth(segment[1])
+  end
+  local subject_width = math.max(10, width - used - DATE_WIDTH - 3)
+  local subject = M.oneline(message.headers.Subject)
+  segments[#segments + 1] = {
+    M.fit(subject ~= "" and subject or "(no subject)", subject_width) .. "  ",
+    unread and "EmailSubjectUnread" or "EmailSubject",
+  }
+  local date = M.date(message.timestamp, now)
+  segments[#segments + 1] = { string.rep(" ", DATE_WIDTH - #date) .. date .. " ", "EmailDate" }
+
+  local text, highlights = {}, {}
+  local col = 0
+  for _, segment in ipairs(segments) do
+    text[#text + 1] = segment[1]
+    if segment[2] then
+      highlights[#highlights + 1] = { col, col + #segment[1], segment[2] }
+    end
+    col = col + #segment[1]
+  end
+  return table.concat(text), highlights
+end
+
+function M.size(bytes)
+  if not bytes then
+    return "?"
+  end
+  if bytes < 1024 then
+    return bytes .. " B"
+  end
+  if bytes < 1024 * 1024 then
+    return ("%.0f KiB"):format(bytes / 1024)
+  end
+  return ("%.1f MiB"):format(bytes / 1024 / 1024)
+end
+
+return M
