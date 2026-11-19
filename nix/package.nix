@@ -27,8 +27,8 @@
             );
           };
 
-          # go-sum: dc72a53daffb3f1f7f970e9d8b76235e5eaaf36f2088b0950099a0255fd5b8ba
-          vendorHash = "sha256-vA1Xrh7wAtniACEt29mM1wuh2eMt7yYH9laezqLiAhs=";
+          # go-sum: b6abb22818cb57b7c897b171bc15d2493409d3fd778c5d34a365d4978f8483d3
+          vendorHash = "sha256-Hf4JtUiu7YW/hpcOo7y7B0cwJK1dXE8t/E5nharBeVM=";
 
           ldflags = [
             "-s"

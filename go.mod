@@ -6,13 +6,13 @@ toolchain go1.27.4
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/stubbedev/html-to-md/go v0.0.0-20261010111345-067b144b0e51
+	github.com/stubbedev/html-to-md/go v0.0.0-20261119084339-a7f8951cf0d3
 )
 
 require (
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
-	github.com/mattn/go-runewidth v0.0.30 // indirect
+	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect

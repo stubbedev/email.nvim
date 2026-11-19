@@ -9,4 +9,4 @@ package main
 import "github.com/stubbedev/html-to-md/go/htmltomd"
 
 // htmlToMarkdown renders a mail's HTML part as Markdown.
-func htmlToMarkdown(src string) string { return htmltomd.Convert(src) }
+func htmlToMarkdown(src string) string { return htmltomd.Convert(src, htmltomd.Options{}) }
