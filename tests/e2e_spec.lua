@@ -711,3 +711,79 @@ describe("e2e: smart folders are saved searches above the accounts, with unread 
   state.config.searches = {}
   eq({}, errors)
 end)
+
+describe("e2e: signatures, the attach picker, an HTML alternative and undo send", function()
+  require("email.ui.layout").close()
+  local account = state.config.accounts[1]
+  account.signature = "Test User\nexample.com"
+  state.config.html_cmd = { "sh", "-c", "printf '<p>'; cat; printf '</p>'" }
+  state.config.send_delay = 1
+  local attachment = root .. "/notes.txt"
+  write(attachment, "notes")
+  state.config.attach_picker = function(add)
+    add({ attachment })
+  end
+  vim.cmd("Email")
+  wait("list", function()
+    return state.busy == 0 and state.win.list ~= nil
+  end)
+  vim.api.nvim_set_current_win(state.win.list)
+  keys("c")
+  wait("composer", function()
+    return vim.bo.filetype == "mail"
+  end)
+  vim.cmd("stopinsert")
+  local buf = vim.api.nvim_get_current_buf()
+  eq({ "", "", "-- ", "Test User", "example.com" }, vim.api.nvim_buf_get_lines(buf, 5, -1, false))
+  vim.api.nvim_buf_set_lines(buf, 1, 2, false, { "To: friend@example.org" })
+  vim.api.nvim_buf_set_lines(buf, 3, 4, false, { "Subject: With extras" })
+  vim.api.nvim_buf_set_lines(buf, 5, 6, false, { "**hello**" })
+  keys("<leader>ma")
+  eq("Attach: " .. attachment, vim.api.nvim_buf_get_lines(buf, 4, 5, false)[1])
+
+  os.remove(sent_path)
+  keys("<leader>ms")
+  wait("the composer to hide", function()
+    return state.pending_send ~= nil
+  end)
+  eq(false, vim.api.nvim_get_current_buf() == buf)
+  require("email.async").run(require("email.actions").handlers.undo)
+  wait("the composer back", function()
+    return state.pending_send == nil and vim.api.nvim_get_current_buf() == buf
+  end)
+  vim.wait(1500)
+  eq(nil, io.open(sent_path))
+
+  keys("<leader>ms")
+  wait("the delayed send", function()
+    return not vim.api.nvim_buf_is_valid(buf) and io.open(sent_path) ~= nil and state.busy == 0
+  end)
+  local sent = read_sent()
+  eq(true, sent:find("Content-Type: multipart/mixed", 1, true) ~= nil)
+  eq(true, sent:find("Content-Type: multipart/alternative", 1, true) ~= nil)
+  local html = sent:match("Content%-Type: text/html; charset=utf%-8\nContent%-Transfer%-Encoding: base64\n\n(.-)\n%-%-")
+  eq(true, vim.base64.decode((html:gsub("\n", ""))):find("<p>**hello**", 1, true) ~= nil)
+  eq(true, sent:find('filename="notes.txt"', 1, true) ~= nil)
+  eq(true, sent:find("Test User", 1, true) ~= nil)
+
+  account.signature = nil
+  state.config.html_cmd = nil
+  state.config.send_delay = 0
+  state.config.attach_picker = nil
+  eq({}, errors)
+end)
+
+describe("e2e: a reply puts the signature above the quoted message", function()
+  state.config.accounts[1].signature = "Test User"
+  local draft
+  require("email.async").run(function()
+    draft = require("email.compose").reply("c2@example.org", false)
+  end)
+  wait("the reply draft", function()
+    return draft ~= nil
+  end)
+  eq({ "", "", "-- ", "Test User", "" }, vim.list_slice(draft.body, 1, 5))
+  eq(true, draft.body[6]:find("wrote:$") ~= nil)
+  state.config.accounts[1].signature = nil
+  eq({}, errors)
+end)

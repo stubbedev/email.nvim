@@ -1,4 +1,5 @@
 local async = require("email.async")
+local format = require("email.format")
 local ical = require("email.ical")
 local layout = require("email.ui.layout")
 local maildir = require("email.maildir")
@@ -122,11 +123,36 @@ local function raw_headers(raw)
   return headers
 end
 
+local function signature(account)
+  if not account or not account.signature or account.signature == "" then
+    return {}
+  end
+  local lines = { "-- " }
+  vim.list_extend(lines, vim.split(vim.trim(account.signature), "\n", { plain = true }))
+  return lines
+end
+
+local function opening(account)
+  local body = { "", "" }
+  local sig = signature(account)
+  if #sig > 0 then
+    vim.list_extend(body, sig)
+    body[#body + 1] = ""
+  end
+  return body
+end
+
 function M.new(account, to)
+  local body = { "" }
+  local sig = signature(account)
+  if #sig > 0 then
+    body[#body + 1] = ""
+    vim.list_extend(body, sig)
+  end
   return {
     headers = { From = account.from, To = to or "", Cc = "", Subject = "" },
     hidden = {},
-    body = { "" },
+    body = body,
   }
 end
 
@@ -134,8 +160,9 @@ function M.reply(id, all)
   local config = state.config
   local message = parse.message(notmuch.show(id), config.alternatives)
   local reply = notmuch.reply_headers(id, all)
-  local body =
-    { "", "", ("On %s, %s wrote:"):format(os.date("%Y-%m-%d %H:%M", message.timestamp), message.headers.From) }
+  local me = mime.parse_addresses(reply.From or "")[1]
+  local body = opening(me and M.account_for_address(me.addr))
+  body[#body + 1] = ("On %s, %s wrote:"):format(os.date("%Y-%m-%d %H:%M", message.timestamp), message.headers.From)
   vim.list_extend(body, quote(plain_text(message)))
   return {
     headers = { From = reply.From, To = reply.To or "", Cc = reply.Cc or "", Subject = reply.Subject or "" },
@@ -149,7 +176,8 @@ function M.forward(id)
   local config = state.config
   local message = parse.message(notmuch.show(id), config.alternatives)
   local account = M.account_of_message(message)
-  local body = { "", "", "---------- Forwarded message ----------" }
+  local body = opening(account)
+  body[#body + 1] = "---------- Forwarded message ----------"
   vim.list_extend(body, render.header_lines(message.headers))
   body[#body + 1] = ""
   vim.list_extend(body, plain_text(message))
@@ -224,6 +252,18 @@ function M.calendar_reply(id, partstat)
   }
 end
 
+local function html_alternative(text)
+  local cmd = state.config.html_cmd
+  if not cmd then
+    return nil
+  end
+  local html = async.checked(cmd, { stdin = text, text = true })
+  return {
+    content_type = "text/html; charset=utf-8",
+    data = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' .. html .. "</body></html>\n",
+  }
+end
+
 local function finalize(parsed, draft, require_recipients)
   local from = mime.parse_addresses(parsed.headers.From or "")[1] or error("From is empty", 0)
   local domain = from.addr:match("@([^@]+)$") or error(("From address %q has no domain"):format(from.addr), 0)
@@ -258,15 +298,22 @@ local function finalize(parsed, draft, require_recipients)
   for i, path in ipairs(parsed.attach) do
     attachments[i] = { filename = vim.fs.basename(path), data = read_file(path) }
   end
+  local alternatives = {}
+  local html = require_recipients and html_alternative(parsed.body)
+  if html then
+    alternatives[#alternatives + 1] = html
+  end
+  if draft.calendar then
+    alternatives[#alternatives + 1] =
+      { content_type = "text/calendar; charset=utf-8; method=REPLY", data = draft.calendar.ics }
+  end
   return account,
     message_id:sub(2, -2),
     mime.build({
       headers = headers,
       body = parsed.body,
       attachments = attachments,
-      alternatives = draft.calendar and {
-        { content_type = "text/calendar; charset=utf-8; method=REPLY", data = draft.calendar.ics },
-      } or {},
+      alternatives = alternatives,
       boundary = "=_" .. hex(vim.uv.random(12)),
     })
 end
@@ -295,6 +342,54 @@ local function remove_draft(draft)
   draft.draft_id = nil
 end
 
+local function deliver(session, parsed, account, message)
+  layout.with_busy("Sending", function()
+    async.checked(state.config.send_cmd, { stdin = message })
+    notmuch.insert(account.maildir .. "/" .. account.sent, message, { "+sent", "-inbox", "-unread" })
+    if session.draft.reply_to then
+      notmuch.tag({ session.draft.reply_to }, { "+replied" })
+    end
+    remove_draft(session.draft)
+  end)
+  session.close()
+  vim.notify(("email.nvim: sent %q"):format(parsed.headers.Subject or ""))
+  local sync = state.config.sync_cmd
+  if sync then
+    vim.system(sync, {}, function() end)
+  end
+end
+
+local function flush_pending()
+  local pending = state.pending_send
+  if not pending then
+    return
+  end
+  state.pending_send = nil
+  pending.timer:stop()
+  pending.timer:close()
+  local done = false
+  async.run(pending.session.lock, function()
+    local ok, err = pcall(deliver, pending.session, pending.parsed, pending.account, pending.message)
+    done = true
+    if not ok then
+      error(err, 0)
+    end
+  end)
+  return function()
+    return done
+  end
+end
+
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  group = vim.api.nvim_create_augroup("email.nvim.send", { clear = true }),
+  callback = function()
+    local finished = flush_pending()
+    if finished then
+      vim.wait(30000, finished, 50)
+    end
+  end,
+})
+
 function M.send(session)
   async.run(session.lock, function()
     if session.closed then
@@ -302,16 +397,54 @@ function M.send(session)
     end
     local parsed = session.current()
     local account, _, message = finalize(parsed, session.draft, true)
-    layout.with_busy("Sending", function()
-      async.checked(state.config.send_cmd, { stdin = message })
-      notmuch.insert(account.maildir .. "/" .. account.sent, message, { "+sent", "-inbox", "-unread" })
-      if session.draft.reply_to then
-        notmuch.tag({ session.draft.reply_to }, { "+replied" })
-      end
-      remove_draft(session.draft)
-    end)
-    session.close()
-    vim.notify(("email.nvim: sent %q"):format(parsed.headers.Subject or ""))
+    local delay = state.config.send_delay
+    if delay <= 0 then
+      deliver(session, parsed, account, message)
+      return
+    end
+    flush_pending()
+    session.hide()
+    local timer = assert(vim.uv.new_timer())
+    state.pending_send = { session = session, parsed = parsed, account = account, message = message, timer = timer }
+    timer:start(delay * 1000, 0, vim.schedule_wrap(flush_pending))
+    local undo = state.config.keymaps.global.undo
+    vim.notify(
+      ("email.nvim: sending %q in %ds%s"):format(
+        parsed.headers.Subject or "",
+        delay,
+        undo and (" · " .. format.key(type(undo) == "table" and undo[1] or undo) .. " to undo") or ""
+      )
+    )
+  end)
+end
+
+function M.cancel_send()
+  local pending = state.pending_send
+  if not pending then
+    return false
+  end
+  state.pending_send = nil
+  pending.timer:stop()
+  pending.timer:close()
+  pending.session.show()
+  vim.notify("email.nvim: sending cancelled")
+  return true
+end
+
+function M.attach(session)
+  local function add(paths)
+    if paths and #paths > 0 and vim.api.nvim_buf_is_valid(session.buf) then
+      require("email.ui.composer").add_attachments(session.buf, paths)
+    end
+  end
+  if state.config.attach_picker then
+    state.config.attach_picker(add)
+    return
+  end
+  vim.ui.input({ prompt = "Attach file: ", completion = "file" }, function(path)
+    if path and path ~= "" then
+      add({ path })
+    end
   end)
 end
 

@@ -56,6 +56,7 @@ M.descriptions = {
   mark_all = "Mark all on page",
   unmark_all = "Clear marks",
   undo = "Undo the last move, delete or send",
+  attach = "Attach files",
   send = "Send",
   discard = "Discard",
 }
@@ -428,7 +429,12 @@ local function pipe_to(message, cmd)
 end
 
 local function open_composer(draft)
-  composer.open(draft, { send = compose.send, save = compose.save }, state.config.keymaps.composer, state.config.border)
+  composer.open(
+    draft,
+    { send = compose.send, save = compose.save, attach = compose.attach },
+    state.config.keymaps.composer,
+    state.config.border
+  )
 end
 
 local function prepare(fn, ...)
@@ -554,6 +560,9 @@ M.handlers = {
     end, "Deleting")
   end,
   undo = function()
+    if compose.cancel_send() then
+      return
+    end
     local undo = state.undo or error("nothing to undo", 0)
     state.undo = nil
     layout.with_busy("Undoing", function()

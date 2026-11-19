@@ -76,6 +76,7 @@ require("email").setup({
 })
 ```
 
+An optional `signature` is added below a `-- ` line in new mail, and above the quote in replies and forwards.
 `maildir`, `inbox`, `sent`, `drafts`, `archive` and `trash` are paths relative to the notmuch database root and to the
 account's maildir respectively. `addresses` decides which account a `From:` address belongs to.
 
@@ -100,6 +101,9 @@ The source only answers inside email.nvim's composer, on recipient headers.
 | `alternatives` | `{ "text/html", "text/plain" }` | Preference order inside `multipart/alternative` |
 | `markdown` | `types = { "text/html", "text/calendar" }` and icons | Which content types' rendered output is Markdown (others are shown verbatim), and the `headings`, `bullets`, `quote`, `link`, `email` and `image` icons |
 | `send_cmd` | `{ "msmtp", "--read-envelope-from", "--read-recipients" }` | Reads the message on stdin |
+| `send_delay` | `0` | Seconds a sent message waits before it goes out; the undo key brings the composer back meanwhile, and quitting Neovim sends it at once |
+| `html_cmd` | `nil` | Argv that turns the body into HTML on stdin, for example `{ "cmark-gfm", "--hardbreaks", "--extension", "table", "--extension", "autolink" }`; sent mail then carries the HTML as an alternative to the plain text (drafts stay plain) |
+| `attach_picker` | `nil` | `function(add)` that calls `add(paths)`, for a file picker of your choice; without it the attach key prompts with file completion |
 | `sync_cmd` | `nil` | Run by the sync key |
 | `page_size` | `100` | Messages fetched at a time; the next batch loads as the cursor nears the end of the list |
 | `reader_mouse` | `true` | Enable the mouse in normal mode while the message window has focus, so a click opens links |
@@ -135,7 +139,7 @@ and the rarer actions live under `<leader>m`, so which-key lists them. Press `g?
 | | `<C-h>` | focus folders |
 | message | `q` `]]` `[[` `]m` `[m` `gx` click | back to the list, next and previous conversation, next and previous message in it, open the link under the cursor or the mouse |
 | folders | `<CR>` `q` `<C-l>` | open folder, quit, focus list |
-| composer | `<leader>ms` `<leader>md` `:w` | send, discard, save draft |
+| composer | `<leader>ms` `<leader>ma` `<leader>md` `:w` | send, attach files, discard, save draft |
 
 ## Highlights
 

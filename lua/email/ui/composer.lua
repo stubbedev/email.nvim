@@ -55,6 +55,52 @@ function M.parse(lines)
   return { headers = headers, attach = attach, body = table.concat(lines, "\n", i + 1) }
 end
 
+local function show(session)
+  local width = math.floor(vim.o.columns * 0.8)
+  local height = math.floor((vim.o.lines - vim.o.cmdheight) * 0.8)
+  local keymaps = session.keymaps
+  session.win = vim.api.nvim_open_win(session.buf, true, {
+    relative = "editor",
+    row = math.floor((vim.o.lines - vim.o.cmdheight - height) / 2),
+    col = math.floor((vim.o.columns - width) / 2),
+    width = width,
+    height = height,
+    border = session.border,
+    title = " Compose ",
+    title_pos = "center",
+    footer = (" %s%s send · %s attach · :w save draft · %s discard "):format(
+      session.draft.calendar and ("calendar reply: " .. session.draft.calendar.label .. " · ") or "",
+      keymaps.send and format.keys(keymaps.send) or "-",
+      keymaps.attach and format.keys(keymaps.attach) or "-",
+      keymaps.discard and format.keys(keymaps.discard) or "-"
+    ),
+    footer_pos = "center",
+    zindex = 60,
+  })
+  vim.wo[session.win].wrap = true
+  vim.wo[session.win].linebreak = true
+end
+
+function M.add_attachments(buf, paths)
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local blank = #lines + 1
+  for i, line in ipairs(lines) do
+    if line == "" then
+      blank = i
+      break
+    end
+  end
+  local entries = {}
+  for i, path in ipairs(paths) do
+    local full = vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
+    if not vim.uv.fs_stat(full) then
+      error(("cannot attach %s: no such file"):format(full), 0)
+    end
+    entries[i] = "Attach: " .. full
+  end
+  vim.api.nvim_buf_set_lines(buf, blank - 1, blank - 1, false, entries)
+end
+
 function M.open(draft, handlers, keymaps, border)
   counter = counter + 1
   local buf = vim.api.nvim_create_buf(true, false)
@@ -69,40 +115,38 @@ function M.open(draft, handlers, keymaps, border)
   vim.b[buf].email_composer = true
   addresses.refresh()
 
-  local width = math.floor(vim.o.columns * 0.8)
-  local height = math.floor((vim.o.lines - vim.o.cmdheight) * 0.8)
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = "editor",
-    row = math.floor((vim.o.lines - vim.o.cmdheight - height) / 2),
-    col = math.floor((vim.o.columns - width) / 2),
-    width = width,
-    height = height,
+  local session = {
+    buf = buf,
+    draft = draft,
+    keymaps = keymaps,
     border = border,
-    title = " Compose ",
-    title_pos = "center",
-    footer = (" %s%s send · :w save draft · %s discard "):format(
-      draft.calendar and ("calendar reply: " .. draft.calendar.label .. " · ") or "",
-      keymaps.send and format.keys(keymaps.send) or "-",
-      keymaps.discard and format.keys(keymaps.discard) or "-"
-    ),
-    footer_pos = "center",
-    zindex = 60,
-  })
-  vim.wo[win].wrap = true
-  vim.wo[win].linebreak = true
-
-  local function current()
+    lock = async.mutex(),
+    closed = false,
+  }
+  function session.current()
     return M.parse(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
   end
-  local session
-  local function close()
-    session.closed = true
-    vim.bo[buf].modified = false
-    if vim.api.nvim_win_is_valid(win) then
-      vim.api.nvim_win_close(win, true)
+  function session.hide()
+    vim.bo[buf].bufhidden = "hide"
+    if session.win and vim.api.nvim_win_is_valid(session.win) then
+      vim.api.nvim_win_close(session.win, true)
     end
   end
-  session = { buf = buf, draft = draft, current = current, close = close, lock = async.mutex(), closed = false }
+  function session.show()
+    vim.bo[buf].bufhidden = "wipe"
+    show(session)
+  end
+  function session.close()
+    session.closed = true
+    vim.bo[buf].modified = false
+    vim.bo[buf].bufhidden = "wipe"
+    if session.win and vim.api.nvim_win_is_valid(session.win) then
+      vim.api.nvim_win_close(session.win, true)
+    elseif vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end
+  show(session)
 
   vim.api.nvim_create_autocmd("BufWipeout", {
     buffer = buf,
@@ -120,9 +164,12 @@ function M.open(draft, handlers, keymaps, border)
     send = function()
       handlers.send(session)
     end,
+    attach = function()
+      handlers.attach(session)
+    end,
     discard = function()
       if vim.fn.confirm("Discard this message?", "&Discard\n&Keep", 2) == 1 then
-        close()
+        session.close()
       end
     end,
   }
@@ -136,7 +183,7 @@ function M.open(draft, handlers, keymaps, border)
 
   local first_empty = vim.fn.search([[^\(To\|Subject\):\s*$]], "nw")
   if first_empty > 0 then
-    vim.api.nvim_win_set_cursor(win, { first_empty, 0 })
+    vim.api.nvim_win_set_cursor(session.win, { first_empty, 0 })
     vim.cmd("startinsert!")
   end
   return session

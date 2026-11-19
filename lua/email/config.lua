@@ -6,6 +6,9 @@ M.defaults = {
   renderers = {},
   alternatives = { "text/html", "text/plain" },
   send_cmd = { "msmtp", "--read-envelope-from", "--read-recipients" },
+  send_delay = 0,
+  html_cmd = nil,
+  attach_picker = nil,
   sync_cmd = nil,
   page_size = 100,
   refresh_interval = 5000,
@@ -99,6 +102,7 @@ M.defaults = {
       focus_list = "<C-l>",
     },
     composer = {
+      attach = "<leader>ma",
       send = "<leader>ms",
       discard = "<leader>md",
     },
@@ -112,6 +116,7 @@ local function validate_account(account, i)
   end
   vim.validate(where .. ".archive", account.archive, "string", true)
   vim.validate(where .. ".trash", account.trash, "string", true)
+  vim.validate(where .. ".signature", account.signature, "string", true)
   vim.validate(where .. ".addresses", account.addresses, "table")
   vim.validate(where .. ".folders", account.folders, "table")
   if #account.addresses == 0 then
@@ -164,6 +169,9 @@ function M.resolve(opts, actions)
     end
   end
   vim.validate("send_cmd", config.send_cmd, "table")
+  vim.validate("send_delay", config.send_delay, "number")
+  vim.validate("html_cmd", config.html_cmd, "table", true)
+  vim.validate("attach_picker", config.attach_picker, "function", true)
   vim.validate("sync_cmd", config.sync_cmd, "table", true)
   vim.validate("page_size", config.page_size, "number")
   vim.validate("refresh_interval", config.refresh_interval, "number")
