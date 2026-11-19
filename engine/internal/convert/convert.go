@@ -1,0 +1,75 @@
+// Package convert ties the pipeline together: mode sniffing and the
+// HTML→Markdown conversion entry point.
+package convert
+
+import (
+	"strconv"
+	"strings"
+
+	"github.com/stubbedev/email.nvim/engine/internal/ast"
+	"github.com/stubbedev/email.nvim/engine/internal/clean"
+	"github.com/stubbedev/email.nvim/engine/internal/lower"
+	"github.com/stubbedev/email.nvim/engine/internal/render"
+)
+
+// Format is a conversion mode: selected by the binary's flags, or sniffed
+// by Detect.
+type Format uint8
+
+const (
+	Html Format = iota
+	Plain
+	Calendar
+)
+
+// Detect sniffs a mail part. ICS declares itself (BEGIN:VCALENDAR, after
+// any BOM and whitespace); HTML is detected by common tags in the first
+// 2 KB; everything else is plain text.
+func Detect(input string) Format {
+	trimmed := strings.TrimSpace(input)
+	trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "\ufeff"))
+	if strings.HasPrefix(trimmed, "BEGIN:VCALENDAR") {
+		return Calendar
+	}
+	runes := []rune(input)
+	if len(runes) > 2048 {
+		runes = runes[:2048]
+	}
+	head := strings.ToLower(string(runes))
+	for _, tag := range []string{
+		"<!doctype html", "<html", "<body", "<div", "<p>", "<p ", "<br",
+		"<table", "<span", "<strong", "<em>",
+	} {
+		if strings.Contains(head, tag) {
+			return Html
+		}
+	}
+	return Plain
+}
+
+// Convert renders an HTML email body as Markdown. Paragraphs are emitted
+// unwrapped; the pager owns soft-wrapping.
+type Options struct {
+	Images bool
+}
+
+func Convert(html string, opts Options) string {
+	docp, images := clean.Doc(html, opts.Images)
+	shift := max(lower.MinHeadingLevel(docp)-1, 0)
+	blocks := lower.Document(docp, shift)
+	blocks = astDropEmpty(blocks)
+	blocks = astCompress(blocks)
+	blocks = astJoinLinks(blocks)
+	out := strings.TrimLeft(render.Document(blocks), "\n")
+	if len(images) == 0 {
+		return out
+	}
+	return clean.ImageTokenRe.ReplaceAllStringFunc(out, func(token string) string {
+		i, _ := strconv.Atoi(clean.ImageTokenRe.FindStringSubmatch(token)[1])
+		return render.Image(images[i].Alt, images[i].Src)
+	})
+}
+
+func astDropEmpty(bs []ast.Block) []ast.Block { return ast.DropEmptySections(bs) }
+func astCompress(bs []ast.Block) []ast.Block  { return ast.CompressHeadingLevels(bs) }
+func astJoinLinks(bs []ast.Block) []ast.Block { return ast.JoinLinkRows(bs) }

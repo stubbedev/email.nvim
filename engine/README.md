@@ -1,8 +1,17 @@
-# html-to-md
+# email-engine
 
-aerc email→Markdown filters in a single binary. One conversion mode per flag,
-auto-detected from the part when no flag is given (`BEGIN:VCALENDAR` →
-calendar, HTML markers in the first 2 KB → html, else plain):
+The Go engine behind email.nvim, built from this directory by the repository's flake (`nix build`).
+
+| Command | Purpose |
+| --- | --- |
+| `email-engine convert [flags]` | render one mail part from stdin, as below |
+| `email-engine mcp` | serve notmuch to AI agents over the Model Context Protocol (stdio): search, show, count, tags, tag, extract attachments; it never sends, deletes or moves mail |
+| `email-engine version` | print the version |
+
+## convert
+
+One conversion mode per flag, auto-detected from the part when no flag is given (`BEGIN:VCALENDAR` → calendar, HTML
+markers in the first 2 KB → html, else plain):
 
 | Flag | MIME part | Purpose |
 | --- | --- | --- |
@@ -53,7 +62,7 @@ built-in, nvim with treesitter conceal, or a future custom reader) can rely
 on:
 
 - **One line per paragraph.** No hard-wrapping; the pager owns soft-wrapping
-  at the real terminal width (aerc passes no width to filters, so the old
+  at the real terminal width (passes no width to filters, so the old
   converter-side 80-column wrap and `AERC_FILTER_WIDTH` are gone).
 - **Links are always single-line `[text](href)`** — `<br>`/newlines inside
   link text are folded to spaces, so concealers and `:open-link` always see a
@@ -95,7 +104,7 @@ Or via the flake (home-manager):
 inputs.html-to-md.packages.${pkgs.stdenv.hostPlatform.system}.default
 ```
 
-(The flags are explicit in aerc because it already knows the MIME type; the
+(The flags are explicit in because it already knows the MIME type; the
 no-flag auto-detect serves manual pipes and `just try`.)
 
 ## TEXT/PLAIN
