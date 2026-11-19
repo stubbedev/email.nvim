@@ -1,18 +1,20 @@
 ---@diagnostic disable: duplicate-set-field
 vim.g.mapleader = " "
 local placed = {}
-package.preload["image"] = function()
+package.preload["snacks"] = function()
   return {
-    from_file = function(path, opts)
-      local image = { path = path, opts = opts, cleared = false }
-      function image.render(self)
-        placed[#placed + 1] = self
-      end
-      function image.clear(self)
-        self.cleared = true
-      end
-      return image
-    end,
+    image = {
+      placement = {
+        new = function(buf, src, opts)
+          local placement = { buf = buf, src = src, opts = opts, closed = false }
+          function placement.close(self)
+            self.closed = true
+          end
+          placed[#placed + 1] = placement
+          return placement
+        end,
+      },
+    },
   }
 end
 local root = vim.fn.tempname()
@@ -82,12 +84,10 @@ write(
 vim.env.NOTMUCH_CONFIG = config_path
 assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
 
-local errors, warnings = {}, {}
+local errors = {}
 vim.notify = function(msg, level)
   if level == vim.log.levels.ERROR then
     errors[#errors + 1] = msg
-  elseif level == vim.log.levels.WARN then
-    warnings[#warnings + 1] = msg
   end
 end
 vim.o.columns, vim.o.lines = 160, 50
@@ -327,8 +327,8 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
   end)
   focus_row(1)
   keys("<CR>")
-  wait("three images", function()
-    return #placed == 3
+  wait("four images", function()
+    return #placed == 4
   end)
   local lines = vim.api.nvim_buf_get_lines(state.buf.reader, 0, -1, false)
   local function row_of(anchor)
@@ -338,25 +338,25 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
       end
     end
   end
-  for _, image in ipairs(placed) do
-    eq(state.win.reader, image.opts.window)
+  for _, placement in ipairs(placed) do
+    eq(state.buf.reader, placement.buf)
+    eq(true, placement.opts.inline)
   end
-  eq({ row_of("#image-1"), row_of("#image-1") + 1, row_of("#image-4") }, {
-    placed[1].opts.y,
-    placed[2].opts.y,
-    placed[3].opts.y,
+  eq({ row_of("#image-1"), row_of("#image-1") + 1, row_of("#image-1") + 2, row_of("#image-4") }, {
+    placed[1].opts.pos[1] - 1,
+    placed[2].opts.pos[1] - 1,
+    placed[3].opts.pos[1] - 1,
+    placed[4].opts.pos[1] - 1,
   })
-  eq(true, placed[1].path:match("%.png$") ~= nil)
-  eq("\137PNG\r\n\26\n", assert(io.open(placed[2].path, "rb")):read("*a"))
-  eq(true, placed[3].path:match("%.jpg$") ~= nil)
+  eq(true, placed[1].src:match("%.png$") ~= nil)
+  eq("\137PNG\r\n\26\n", assert(io.open(placed[2].src, "rb")):read("*a"))
+  eq("http://127.0.0.1:9/gone.png", placed[3].src)
+  eq(true, placed[4].src:match("%.jpg$") ~= nil)
   eq(nil, table.concat(lines, "\n"):find("base64", 1, true))
-  wait("warning about the unreachable remote image", function()
-    return #warnings == 1
-  end)
-  eq(true, warnings[1]:find("could not fetch image http://127.0.0.1:9/gone.png", 1, true) ~= nil)
-  eq(3, #placed)
   keys("q")
-  eq(true, placed[1].cleared and placed[2].cleared and placed[3].cleared)
+  for _, placement in ipairs(placed) do
+    eq(true, placement.closed)
+  end
   eq({}, errors)
 end)
 

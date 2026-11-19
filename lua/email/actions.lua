@@ -223,7 +223,7 @@ local function show(summary)
   end)
   layout.focus("reader")
   if pending and #pending.references > 0 then
-    images.show(pending.message, pending.references, pending.buf, state.win.reader, pending.first_row)
+    images.show(pending.message, pending.references, pending.buf, pending.first_row)
   end
 end
 

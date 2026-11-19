@@ -1,4 +1,3 @@
-local async = require("email.async")
 local format = require("email.format")
 local notmuch = require("email.notmuch")
 local state = require("email.state")
@@ -117,92 +116,36 @@ function M.resolve(message, reference, dir, index)
   return nil
 end
 
-local function download_all(jobs)
-  local results = {}
-  if #jobs == 0 then
-    return results
-  end
-  local remaining = #jobs
-  async.await(function(resolve)
-    for i, job in ipairs(jobs) do
-      vim.system({
-        "curl",
-        "--fail",
-        "--silent",
-        "--show-error",
-        "--location",
-        "--max-time",
-        "15",
-        "--output",
-        job.path,
-        job.url,
-      }, {}, function(result)
-        results[i] = result
-        remaining = remaining - 1
-        if remaining == 0 then
-          resolve()
-        end
-      end)
-    end
-  end)
-  return results
-end
-
 function M.clear()
-  for _, image in ipairs(shown) do
-    image:clear()
+  for _, placement in ipairs(shown) do
+    placement:close()
   end
   shown = {}
 end
 
-function M.show(message, references, buf, win, first_row)
+function M.show(message, references, buf, first_row)
   M.clear()
   local options = state.config.images
   local dir = vim.fn.tempname()
   vim.fn.mkdir(dir, "p")
-  local api = require("image")
-  local function place(reference, path)
-    if not state.current or state.current.id ~= message.id or not vim.api.nvim_win_is_valid(win) then
-      return false
-    end
-    if path then
-      local image = api.from_file(path, {
-        window = win,
-        buffer = buf,
-        with_virtual_padding = true,
-        inline = true,
-        x = 0,
-        y = first_row + reference.row - 1,
-        max_width_window_percentage = options.max_width,
-        max_height_window_percentage = options.max_height,
-      })
-      if image then
-        image:render()
-        shown[#shown + 1] = image
-      end
-    end
-    return true
-  end
-  local remote = {}
+  local placement = require("snacks").image.placement
   for index, reference in ipairs(references) do
+    local src
     if reference.source:match("^https?://") then
-      if options.remote then
-        remote[#remote + 1] =
-          { reference = reference, url = reference.source, path = ("%s/image-%d"):format(dir, index) }
-      end
-    elseif not place(reference, M.resolve(message, reference, dir, index)) then
+      src = options.remote and reference.source or nil
+    else
+      src = M.resolve(message, reference, dir, index)
+    end
+    if not state.current or state.current.id ~= message.id or not vim.api.nvim_buf_is_valid(buf) then
       return
     end
-  end
-  for i, result in ipairs(download_all(remote)) do
-    local job = remote[i]
-    if result.code ~= 0 then
-      vim.notify(
-        ("email.nvim: could not fetch image %s: %s"):format(job.url, vim.trim(result.stderr or "")),
-        vim.log.levels.WARN
-      )
-    elseif not place(job.reference, job.path) then
-      return
+    if src then
+      shown[#shown + 1] = placement.new(buf, src, {
+        pos = { first_row + reference.row, 0 },
+        inline = true,
+        max_width = options.max_width,
+        max_height = options.max_height,
+      })
     end
   end
 end

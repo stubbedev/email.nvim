@@ -158,7 +158,7 @@ function M.resolve(opts, actions)
   vim.validate("images.max_width", config.images.max_width, "number")
   vim.validate("images.max_height", config.images.max_height, "number")
   if config.images.enabled then
-    require("image")
+    require("snacks")
   end
   validate_keymaps(config.keymaps, actions)
   config.downloads_dir = vim.fs.normalize(config.downloads_dir)
