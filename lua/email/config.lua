@@ -6,11 +6,11 @@ M.defaults = {
   alternatives = { "text/html", "text/plain" },
   send_cmd = { "msmtp", "--read-envelope-from", "--read-recipients" },
   sync_cmd = nil,
-  pipes = {},
   page_size = 100,
   refresh_interval = 5000,
   downloads_dir = "~/Downloads",
   layout = "float",
+  reader_mouse = true,
   border = "rounded",
   width = 0.9,
   height = 0.9,
@@ -77,8 +77,6 @@ M.defaults = {
     list = {
       open = "<CR>",
       quit = "q",
-      next_page = "]]",
-      prev_page = "[[",
       mark = "<Tab>",
       mark_all = "<C-a>",
       unmark_all = "<Esc>",
@@ -89,6 +87,7 @@ M.defaults = {
       next_message = "]]",
       prev_message = "[[",
       open_link = "gx",
+      click_link = "<LeftMouse>",
     },
     sidebar = {
       select_folder = "<CR>",
@@ -156,17 +155,12 @@ function M.resolve(opts, actions)
   end
   vim.validate("send_cmd", config.send_cmd, "table")
   vim.validate("sync_cmd", config.sync_cmd, "table", true)
-  vim.validate("pipes", config.pipes, "table")
-  for i, pipe in ipairs(config.pipes) do
-    vim.validate(("pipes[%d].key"):format(i), pipe.key, "string")
-    vim.validate(("pipes[%d].cmd"):format(i), pipe.cmd, "table")
-    vim.validate(("pipes[%d].desc"):format(i), pipe.desc, "string")
-  end
   vim.validate("page_size", config.page_size, "number")
   vim.validate("refresh_interval", config.refresh_interval, "number")
   if config.layout ~= "float" and config.layout ~= "full" then
     error(('layout must be "float" or "full", got %s'):format(vim.inspect(config.layout)), 0)
   end
+  vim.validate("reader_mouse", config.reader_mouse, "boolean")
   vim.validate("devicons", config.devicons, "boolean")
   vim.validate("icons", config.icons, "table")
   vim.validate("folder_icons", config.folder_icons, "table")

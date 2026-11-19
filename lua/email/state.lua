@@ -1,5 +1,4 @@
 local state = {}
-state.page = 1
 state.total = 0
 state.messages = {}
 state.marked = {}

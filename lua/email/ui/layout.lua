@@ -18,6 +18,23 @@ local PLAIN_WINDOW = {
 local group = vim.api.nvim_create_augroup("email.nvim.layout", { clear = true })
 local spinner_timer, spinner_frame, spinner_label
 local bars = {}
+local saved_mouse
+
+local function mouse_on()
+  if saved_mouse ~= nil or vim.o.mouse:find("[an]") then
+    return
+  end
+  saved_mouse = vim.o.mouse
+  vim.o.mouse = vim.o.mouse .. "n"
+end
+
+local function mouse_off()
+  if saved_mouse == nil then
+    return
+  end
+  vim.o.mouse = saved_mouse
+  saved_mouse = nil
+end
 
 local function full()
   return state.config.layout == "full"
@@ -201,6 +218,7 @@ function M.close()
   end
   state.closing = true
   images.clear()
+  mouse_off()
   for _, name in ipairs({ "reader", "sidebar", "list" }) do
     close_window(state.win[name])
   end
@@ -287,6 +305,11 @@ function M.open_reader()
     win = float_window(buf, true, geometry().reader, "Email")
   end
   register("reader", win, buf, "Email")
+  if state.config.reader_mouse then
+    vim.api.nvim_create_autocmd("WinEnter", { group = group, buffer = buf, callback = mouse_on })
+    vim.api.nvim_create_autocmd({ "WinLeave", "BufWipeout" }, { group = group, buffer = buf, callback = mouse_off })
+    mouse_on()
+  end
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
   vim.wo[win].breakindent = true
@@ -298,6 +321,7 @@ end
 
 function M.close_reader()
   images.clear()
+  mouse_off()
   local buf = state.buf.reader
   if valid(state.win.reader) then
     state.closing = true

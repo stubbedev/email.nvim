@@ -25,7 +25,7 @@ function M.open(search)
     actions.bind(state.buf.sidebar, { "global", "sidebar" })
   end
   if search then
-    state.folder, state.page = { search = search }, 1
+    state.folder, state.messages = { search = search }, {}
   end
   async.run(function()
     actions.reload()

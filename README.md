@@ -12,7 +12,8 @@ listing, searching and opening mail is instant on a local Maildir kept in sync b
 - Markdown output is **rendered**, in the style of render-markdown.nvim: headings with icons and tinted backgrounds,
   bullets, quote bars, rules, code blocks and box-drawn tables that shrink to the window and wrap inside their cells.
   Links show only their label; the URL rides on the text as a terminal hyperlink (OSC 8), so you click the label, and
-  wrapping follows what you see. `gx` opens the link under the cursor.
+  wrapping follows what you see. `gx` or a mouse click opens the link: while the message window has focus,
+  email.nvim turns on Neovim's mouse in normal mode (if it was off) and restores it when you leave.
 - Reply, reply all, forward (with attachments) and drafts in a normal buffer. `:w` saves a draft, `<C-s>` sends.
 - Sending pipes the message to any sendmail-compatible command (`msmtp` by default), then files a copy in the
   account's Sent folder with `notmuch insert`.
@@ -94,8 +95,8 @@ The source only answers inside email.nvim's composer, on recipient headers.
 | `markdown` | `types = { "text/html", "text/calendar" }` and icons | Which content types' rendered output is Markdown (others are shown verbatim), and the `headings`, `bullets`, `quote`, `link`, `email` and `image` icons |
 | `send_cmd` | `{ "msmtp", "--read-envelope-from", "--read-recipients" }` | Reads the message on stdin |
 | `sync_cmd` | `nil` | Run by the sync key |
-| `pipes` | `{}` | Extra keys that pipe the raw message into a command, as `{ key, cmd, desc }` with `cmd` an argv list, for example `{ key = "<leader>mu", cmd = { "mail-unsubscribe" }, desc = "Unsubscribe" }`; listed in the help |
-| `page_size` | `100` | Messages per page |
+| `page_size` | `100` | Messages fetched at a time; the next batch loads as the cursor nears the end of the list |
+| `reader_mouse` | `true` | Enable the mouse in normal mode while the message window has focus, so a click opens links |
 | `refresh_interval` | `5000` | ms between checks of the notmuch database for changes; `0` disables |
 | `downloads_dir` | `~/Downloads` | Where saved attachments go |
 | `layout` | `"float"` | `"float"`: a floating window over the editor. `"full"`: normal windows, like oil: the folders and list open in a tab of their own (or take over the current tab when it holds only an empty buffer, as with `nvim -c Email`) and a message opens in its own tab, titles and status in the winbar; quitting closes the tabs |
@@ -123,10 +124,10 @@ and the rarer actions live under `<leader>m`, so which-key lists them. Press `g?
 | | `<leader>/` | notmuch search |
 | | `<leader>ma` `<leader>mp` `<leader>mf` | attachments, pipe to a command, pick folder |
 | | `<leader>my` `<leader>mn` `<leader>mt` | accept, decline, tentatively accept an invite |
-| list | `<CR>` `q` `]]` `[[` | open, quit, next and previous page |
+| list | `<CR>` `q` | open, quit (more messages load as you scroll) |
 | | `<Tab>` `<C-a>` `<Esc>` | toggle mark (or the visual selection), mark the page, clear marks |
 | | `<C-h>` | focus folders |
-| message | `q` `]]` `[[` `gx` | back to the list, next and previous message, open the link under the cursor |
+| message | `q` `]]` `[[` `gx` click | back to the list, next and previous message, open the link under the cursor or the mouse |
 | folders | `<CR>` `q` `<C-l>` | open folder, quit, focus list |
 | composer | `<leader>ms` `<leader>md` `:w` | send, discard, save draft |
 

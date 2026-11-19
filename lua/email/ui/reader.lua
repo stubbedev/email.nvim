@@ -81,7 +81,7 @@ local function footer(message, keymaps)
   local position = ""
   for i, entry in ipairs(state.messages) do
     if entry.id == message.id then
-      position = (" %d of %d "):format(i + (state.page - 1) * state.config.page_size, state.total)
+      position = (" %d of %d "):format(i, state.total)
     end
   end
   local hints = {}

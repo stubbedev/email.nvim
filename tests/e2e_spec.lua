@@ -115,7 +115,6 @@ require("email").setup({
     end,
   },
   images = { enabled = true, remote = true },
-  pipes = { { key = "<leader>mu", cmd = { "sh", "-c", "grep -m1 '^Subject:'" }, desc = "Show the subject" } },
   send_cmd = { "sh", "-c", 'cat > "$0"', sent_path },
   refresh_interval = 0,
 })
@@ -412,23 +411,6 @@ describe("e2e: attached photos are not drawn once the attachment list collapses"
   keys("q")
 end)
 
-describe("e2e: a pipe key sends the raw message to its command", function()
-  vim.cmd("EmailSearch id:many@example.org")
-  wait("list", function()
-    return state.busy == 0 and #state.messages == 1 and state.messages[1].id == "many@example.org"
-  end)
-  focus_row(1)
-  infos = {}
-  keys("<leader>mu")
-  wait("the pipe's output", function()
-    return #infos > 0
-  end)
-  eq("Subject: Many uploads", infos[#infos])
-  local help =
-    require("email.ui.help").lines(state.config.keymaps, require("email.actions").descriptions, state.config.pipes)
-  eq(true, vim.tbl_contains(help, ("   %-18s %s"):format("<Space>mu", "Show the subject")))
-end)
-
 describe("e2e: the full layout uses normal windows in a tab of its own", function()
   require("email.ui.layout").close()
   state.config.layout = "full"
@@ -490,4 +472,82 @@ describe("e2e: the full layout takes over a tab that holds only an empty buffer"
   eq(tabs - 1, #vim.api.nvim_list_tabpages())
   eq({}, errors)
   state.config.layout = "float"
+end)
+
+describe("e2e: scrolling near the end of the list loads the next batch", function()
+  require("email.ui.layout").close()
+  state.config.page_size = 2
+  vim.cmd("EmailSearch *")
+  wait("the first batch", function()
+    return state.busy == 0 and #state.messages == 2 and state.total > 3
+  end)
+  local total = state.total
+  focus_row(2)
+  vim.api.nvim_exec_autocmds("CursorMoved", { buffer = state.buf.list })
+  wait("every message loaded as the cursor nears the end", function()
+    if state.loading_more then
+      return false
+    end
+    if #state.messages < total then
+      focus_row(#state.messages)
+      vim.api.nvim_exec_autocmds("CursorMoved", { buffer = state.buf.list })
+      return false
+    end
+    return true
+  end)
+  local seen = {}
+  for _, message in ipairs(state.messages) do
+    eq(nil, seen[message.id])
+    seen[message.id] = true
+  end
+  require("email.async").run(require("email.actions").load_list)
+  wait("a refresh keeps every loaded message", function()
+    return state.busy == 0 and #state.messages == total
+  end)
+  state.config.page_size = 100
+  eq({}, errors)
+end)
+
+describe("e2e: clicking a link in a message opens it and the mouse is put back", function()
+  require("email.ui.layout").close()
+  vim.o.mouse = ""
+  vim.cmd("EmailSearch id:many@example.org")
+  wait("message", function()
+    return state.busy == 0 and #state.messages == 1
+  end)
+  focus_row(1)
+  keys("<CR>")
+  wait("reader", function()
+    return state.current ~= nil and state.busy == 0
+  end)
+  eq("n", vim.o.mouse)
+  state.reader_links = { { row = 2, start_col = 4, end_col = 9, url = "https://click.example" } }
+  local opened = {}
+  local open = vim.ui.open
+  vim.ui.open = function(url)
+    opened[#opened + 1] = url
+    return nil, nil
+  end
+  eq(
+    "email: Open the clicked link",
+    vim.api.nvim_buf_call(state.buf.reader, function()
+      return vim.fn.maparg("<LeftMouse>", "n", false, true).desc
+    end)
+  )
+  local getmousepos = vim.fn.getmousepos
+  local click = require("email.actions").handlers.click_link
+  vim.fn.getmousepos = function()
+    return { winid = state.win.reader, line = 2, column = 7 }
+  end
+  click()
+  vim.fn.getmousepos = function()
+    return { winid = state.win.reader, line = 2, column = 2 }
+  end
+  click()
+  vim.fn.getmousepos = getmousepos
+  vim.ui.open = open
+  eq({ "https://click.example" }, opened)
+  keys("q")
+  eq("", vim.o.mouse)
+  eq({}, errors)
 end)

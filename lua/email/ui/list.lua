@@ -19,8 +19,7 @@ local function title()
 end
 
 local function status()
-  local pages = math.max(1, math.ceil(state.total / state.config.page_size))
-  local left = (" Page %d/%d "):format(state.page, pages)
+  local left = (" %d of %d loaded "):format(#state.messages, state.total)
   local marked = vim.tbl_count(state.marked)
   local right = marked > 0 and (" %d marked · %d messages "):format(marked, state.total)
     or (" %d messages "):format(state.total)

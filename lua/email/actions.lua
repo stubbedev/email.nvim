@@ -39,11 +39,10 @@ M.descriptions = {
   pick_folder = "Pick folder",
   open = "Open message",
   quit = "Quit",
-  next_page = "Next page",
-  prev_page = "Previous page",
   focus_sidebar = "Focus folders",
   close_reader = "Back to the list",
   open_link = "Open link under cursor",
+  click_link = "Open the clicked link",
   next_message = "Next message",
   prev_message = "Previous message",
   focus_list = "Focus list",
@@ -86,15 +85,51 @@ function M.load_list(keep_id)
   local generation = state.load_generation
   local q = query()
   local total = notmuch.count(q)
-  local pages = math.max(1, math.ceil(total / state.config.page_size))
-  state.page = math.min(state.page, pages)
-  local raws = notmuch.page(q, state.config.page_size, (state.page - 1) * state.config.page_size)
+  local raws = notmuch.page(q, math.max(state.config.page_size, #state.messages), 0)
   if generation ~= state.load_generation or not layout.is_open() then
     return
   end
   state.total = total
   state.messages = vim.tbl_map(parse.summary, raws)
   list.render(keep_id)
+end
+
+local SCROLL_AHEAD = 20
+
+function M.load_more()
+  if state.loading_more or #state.messages >= state.total then
+    return
+  end
+  state.loading_more = true
+  local generation = state.load_generation
+  local ok, err = pcall(function()
+    local raws = notmuch.page(query(), state.config.page_size, #state.messages)
+    if generation ~= state.load_generation or not layout.is_open() then
+      return
+    end
+    local known = {}
+    for _, message in ipairs(state.messages) do
+      known[message.id] = true
+    end
+    for _, raw in ipairs(raws) do
+      if not known[raw.id] then
+        state.messages[#state.messages + 1] = parse.summary(raw)
+      end
+    end
+    list.render()
+  end)
+  state.loading_more = false
+  if not ok then
+    error(err, 0)
+  end
+end
+
+function M.near_end()
+  local win = state.win.list
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    return false
+  end
+  return vim.api.nvim_win_get_cursor(win)[1] > #state.messages - SCROLL_AHEAD
 end
 
 function M.reload(keep_id)
@@ -234,7 +269,7 @@ end
 
 local function set_folder(folder)
   state.folder = folder
-  state.page = 1
+  state.messages = {}
   state.marked = {}
   if state.reading then
     layout.close_reader()
@@ -323,6 +358,22 @@ local function count_label(messages)
     or ("%d messages"):format(#messages)
 end
 
+local function link_at(row, col)
+  for _, link in ipairs(state.reader_links or {}) do
+    if link.row == row and col >= link.start_col and col < link.end_col then
+      return link
+    end
+  end
+  return nil
+end
+
+local function open_url(url)
+  local _, err = vim.ui.open(url)
+  if err then
+    error(("open %s: %s"):format(url, err), 0)
+  end
+end
+
 local function pipe_to(message, cmd)
   local res = async.system(cmd, { stdin = notmuch.raw(message.id), text = true })
   local output = vim.trim((res.stdout or "") .. (res.stderr or ""))
@@ -386,6 +437,9 @@ local function step_message(delta)
   local id = state.current and state.current.id or (list.selected() or {}).id
   for i, message in ipairs(state.messages) do
     if message.id == id then
+      if delta > 0 and i + delta > #state.messages then
+        M.load_more()
+      end
       local next_message = state.messages[i + delta]
       if not next_message then
         return
@@ -399,7 +453,7 @@ end
 
 M.handlers = {
   help = function()
-    help.open(state.config.keymaps, M.descriptions, state.config.border, state.config.pipes)
+    help.open(state.config.keymaps, M.descriptions, state.config.border)
   end,
   compose = function()
     local account = state.folder.account and state.config.accounts[state.folder.account] or state.config.accounts[1]
@@ -574,20 +628,6 @@ M.handlers = {
   quit = function()
     layout.close()
   end,
-  next_page = function()
-    if state.page * state.config.page_size < state.total then
-      state.page = state.page + 1
-      state.marked = {}
-      M.reload()
-    end
-  end,
-  prev_page = function()
-    if state.page > 1 then
-      state.page = state.page - 1
-      state.marked = {}
-      M.reload()
-    end
-  end,
   focus_sidebar = function()
     layout.focus("sidebar")
   end,
@@ -596,16 +636,21 @@ M.handlers = {
   end,
   open_link = function()
     local row, col = unpack(vim.api.nvim_win_get_cursor(state.win.reader))
-    for _, link in ipairs(state.reader_links or {}) do
-      if link.row == row and col >= link.start_col and col < link.end_col then
-        local _, err = vim.ui.open(link.url)
-        if err then
-          error(("open %s: %s"):format(link.url, err), 0)
-        end
-        return
-      end
+    local link = link_at(row, col)
+    if not link then
+      vim.notify("email.nvim: no link under the cursor")
+      return
     end
-    vim.notify("email.nvim: no link under the cursor")
+    open_url(link.url)
+  end,
+  click_link = function()
+    local pos = vim.fn.getmousepos()
+    local link = pos.winid == state.win.reader and pos.line > 0 and link_at(pos.line, pos.column - 1)
+    if link then
+      open_url(link.url)
+      return
+    end
+    vim.api.nvim_feedkeys(vim.keycode("<LeftMouse>"), "n", false)
   end,
   next_message = function()
     step_message(1)
@@ -655,14 +700,15 @@ function M.bind(buf, contexts)
       end
     end
   end
-  if vim.tbl_contains(contexts, "global") then
-    for _, pipe in ipairs(state.config.pipes) do
-      vim.keymap.set("n", pipe.key, function()
-        async.run(function()
-          pipe_to(target(), pipe.cmd)
-        end)
-      end, { buffer = buf, nowait = true, desc = "email: " .. pipe.desc })
-    end
+  if vim.tbl_contains(contexts, "list") then
+    vim.api.nvim_create_autocmd("CursorMoved", {
+      buffer = buf,
+      callback = function()
+        if M.near_end() then
+          async.run(M.load_more)
+        end
+      end,
+    })
   end
 end
 
