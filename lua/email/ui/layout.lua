@@ -17,16 +17,10 @@ local function geometry()
   local col = math.floor((columns - width) / 2)
   local main_col = col + cfg.sidebar_width + 2
   local main_width = width - cfg.sidebar_width - 4
-  local list_height = height - 2
-  local reader
-  if state.reading then
-    list_height = math.max(3, math.floor(height * cfg.list_ratio) - 2)
-    reader = { row = row + list_height + 2, col = main_col, width = main_width, height = height - list_height - 4 }
-  end
   return {
     sidebar = { row = row, col = col, width = cfg.sidebar_width, height = height - 2 },
-    list = { row = row, col = main_col, width = main_width, height = list_height },
-    reader = reader,
+    list = { row = row, col = main_col, width = main_width, height = height - 2 },
+    reader = { row = row, col = col, width = width - 2, height = height - 2 },
   }
 end
 
@@ -65,6 +59,14 @@ local function open_window(name, buf, enter, g, title)
   return win
 end
 
+local function set_hidden(hidden)
+  for _, name in ipairs({ "sidebar", "list" }) do
+    if valid(state.win[name]) then
+      vim.api.nvim_win_set_config(state.win[name], { hide = hidden })
+    end
+  end
+end
+
 function M.is_open()
   return valid(state.win.list)
 end
@@ -87,7 +89,7 @@ function M.resize()
   end
   local g = geometry()
   for _, name in ipairs({ "sidebar", "list", "reader" }) do
-    if valid(state.win[name]) and g[name] then
+    if valid(state.win[name]) then
       vim.api.nvim_win_set_config(state.win[name], win_config(g[name]))
     end
   end
@@ -139,13 +141,12 @@ function M.open_reader()
     return state.buf.reader
   end
   state.reading = true
-  local g = geometry()
-  local win = open_window("reader", scratch("email-message"), false, g.reader, "Email")
+  local win = open_window("reader", scratch("email-message"), true, geometry().reader, "Email")
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
   vim.wo[win].conceallevel = 2
   vim.wo[win].concealcursor = "nc"
-  M.resize()
+  set_hidden(true)
   return state.buf.reader
 end
 
@@ -157,6 +158,7 @@ function M.close_reader()
     state.closing = false
   end
   state.win.reader, state.buf.reader, state.reading, state.current = nil, nil, false, nil
+  set_hidden(false)
   M.resize()
   M.focus("list")
 end
@@ -167,12 +169,13 @@ function M.focus(name)
   end
 end
 
+local function status_window()
+  return state.reading and "reader" or "sidebar"
+end
+
 local function draw_spinner()
-  if not valid(state.win.sidebar) then
-    return
-  end
   spinner_frame = spinner_frame % #SPINNER + 1
-  M.set_footer("sidebar", " " .. SPINNER[spinner_frame] .. " " .. spinner_label .. " ")
+  M.set_footer(status_window(), " " .. SPINNER[spinner_frame] .. " " .. spinner_label .. " ")
 end
 
 function M.busy(label)
@@ -196,6 +199,9 @@ function M.idle()
   spinner_timer:close()
   spinner_timer = nil
   M.set_footer("sidebar", "")
+  if state.reading then
+    M.set_footer("reader", state.reader_footer or "", "center")
+  end
 end
 
 function M.with_busy(label, fn)

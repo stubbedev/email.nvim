@@ -7,6 +7,7 @@ local M = {}
 
 local HEADERS = { "From", "To", "Cc", "Subject" }
 local LABEL_WIDTH = 9
+local MAX_LISTED = 3
 local INVITE_ACTIONS = { { "accept", "accept" }, { "decline", "decline" }, { "tentative", "maybe" } }
 
 local function invite_hint(keymaps)
@@ -44,7 +45,10 @@ function M.lines(message, body, width, invite, config)
     local start = LABEL_WIDTH + 1
     highlights[#highlights + 1] = { #lines, start, start + #config.icons.invite + 1 + #summary, "EmailInvite" }
   end
-  for i, attachment in ipairs(message.attachments) do
+  local attachments = message.attachments
+  local listed = #attachments <= MAX_LISTED and #attachments or MAX_LISTED - 1
+  for i = 1, listed do
+    local attachment = attachments[i]
     local icon, icon_hl = format.file_icon(attachment.filename, config)
     local entry = ("%s %s (%s)"):format(icon, attachment.filename, format.size(attachment.size))
     if i == 1 then
@@ -54,11 +58,41 @@ function M.lines(message, body, width, invite, config)
     end
     highlights[#highlights + 1] = { #lines, LABEL_WIDTH + 1, LABEL_WIDTH + 1 + #icon, icon_hl }
   end
+  if listed < #attachments then
+    local total = 0
+    for _, attachment in ipairs(attachments) do
+      total = total + (attachment.size or 0)
+    end
+    local summary = ("… %d more, %s total"):format(#attachments - listed, format.size(total))
+    local browse = config.keymaps.global.attachments
+    if browse then
+      summary = summary .. " · " .. format.key(type(browse) == "table" and browse[1] or browse) .. " to browse"
+    end
+    lines[#lines + 1] = label_pad .. summary
+    highlights[#highlights + 1] = { #lines, LABEL_WIDTH + 1, #lines[#lines], "Comment" }
+  end
   lines[#lines + 1] = string.rep("─", width)
   highlights[#highlights + 1] = { #lines, 0, #lines[#lines], "EmailSeparator" }
   lines[#lines + 1] = ""
   vim.list_extend(lines, body)
   return lines, highlights
+end
+
+local function footer(message, keymaps)
+  local position = ""
+  for i, entry in ipairs(state.messages) do
+    if entry.id == message.id then
+      position = (" %d of %d "):format(i + (state.page - 1) * state.config.page_size, state.total)
+    end
+  end
+  local hints = {}
+  for _, action in ipairs({ { "close_reader", "back" }, { "prev_message", "prev" }, { "next_message", "next" } }) do
+    local lhs = keymaps[action[1]]
+    if lhs then
+      hints[#hints + 1] = format.key(type(lhs) == "table" and lhs[1] or lhs) .. " " .. action[2]
+    end
+  end
+  return position .. (#hints > 0 and ("· " .. table.concat(hints, " · ") .. " ") or "")
 end
 
 function M.show(message, body, invite)
@@ -77,6 +111,8 @@ function M.show(message, body, invite)
   vim.api.nvim_win_set_cursor(state.win.reader, { 1, 0 })
   local subject = format.oneline(message.headers.Subject)
   layout.set_title("reader", subject ~= "" and vim.trim(format.fit(subject, width - 4)) or "Email")
+  state.reader_footer = footer(message, state.config.keymaps.reader)
+  layout.set_footer("reader", state.reader_footer, "center")
   return buf, #lines - #body
 end
 

@@ -2,7 +2,7 @@
 
 Read and write email in Neovim on top of a [notmuch](https://notmuchmail.org) index.
 
-A floating three-pane layout (folders, message list, message) in the style of
+A floating layout with folders beside the message list; an opened message takes over the whole view, in the style of
 [himalaya.nvim](https://github.com/knownasnaffy/himalaya.nvim), backed by notmuch instead of the himalaya CLI, so
 listing, searching and opening mail is instant on a local Maildir kept in sync by mbsync, offlineimap or similar.
 
@@ -91,7 +91,7 @@ The source only answers inside email.nvim's composer, on recipient headers.
 | `page_size` | `100` | Messages per page |
 | `refresh_interval` | `5000` | ms between checks of the notmuch database for changes; `0` disables |
 | `downloads_dir` | `~/Downloads` | Where saved attachments go |
-| `border`, `width`, `height`, `sidebar_width`, `list_ratio` | `"rounded"`, `0.9`, `0.9`, `30`, `0.4` | Layout |
+| `border`, `width`, `height`, `sidebar_width` | `"rounded"`, `0.9`, `0.9`, `30` | Layout |
 | `images` | `{ enabled = false, remote = false, max_width = 80, max_height = 40 }` | Inline images through [image.nvim](https://github.com/3rd/image.nvim) (must be installed and set up when enabled); sizes are percentages of the message window; `remote` fetches `http(s)` images, off by default because remote images are how senders track opens |
 | `devicons` | `false` | File icons for attachments from nvim-web-devicons (must be installed when `true`) |
 | `icons` | Nerd Font glyphs | `unread`, `flagged`, `replied`, `attachment`, `marked`, `invite` |
@@ -117,9 +117,8 @@ and the rarer actions live under `<leader>m`, so which-key lists them. Press `g?
 | | `<leader>my` `<leader>mn` `<leader>mt` | accept, decline, tentatively accept an invite |
 | list | `<CR>` `q` `]]` `[[` | open, quit, next and previous page |
 | | `<Tab>` `<C-a>` `<Esc>` | toggle mark (or the visual selection), mark the page, clear marks |
-| | `<C-h>` `<C-j>` | focus folders, focus message |
-| message | `q` `]]` `[[` | close, next and previous message |
-| | `<C-k>` `<C-h>` | focus list, focus folders |
+| | `<C-h>` | focus folders |
+| message | `q` `]]` `[[` | back to the list, next and previous message |
 | folders | `<CR>` `q` `<C-l>` | open folder, quit, focus list |
 | composer | `<leader>ms` `<leader>md` `:w` | send, discard, save draft |
 

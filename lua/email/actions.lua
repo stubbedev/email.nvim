@@ -41,8 +41,7 @@ M.descriptions = {
   next_page = "Next page",
   prev_page = "Previous page",
   focus_sidebar = "Focus folders",
-  focus_reader = "Focus message",
-  close_reader = "Close message",
+  close_reader = "Back to the list",
   next_message = "Next message",
   prev_message = "Previous message",
   focus_list = "Focus list",
@@ -582,9 +581,6 @@ M.handlers = {
   end,
   focus_sidebar = function()
     layout.focus("sidebar")
-  end,
-  focus_reader = function()
-    layout.focus("reader")
   end,
   close_reader = function()
     layout.close_reader()

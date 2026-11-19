@@ -13,7 +13,6 @@ M.defaults = {
   width = 0.9,
   height = 0.9,
   sidebar_width = 30,
-  list_ratio = 0.4,
   devicons = false,
   images = {
     enabled = false,
@@ -73,14 +72,11 @@ M.defaults = {
       mark_all = "<C-a>",
       unmark_all = "<Esc>",
       focus_sidebar = "<C-h>",
-      focus_reader = "<C-j>",
     },
     reader = {
       close_reader = "q",
       next_message = "]]",
       prev_message = "[[",
-      focus_list = "<C-k>",
-      focus_sidebar = "<C-h>",
     },
     sidebar = {
       select_folder = "<CR>",

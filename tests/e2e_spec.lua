@@ -158,6 +158,14 @@ describe("e2e: the reader shows an invite row for calendar invitations", functio
   wait("reader", function()
     return state.current ~= nil
   end)
+  eq(true, vim.api.nvim_win_get_config(state.win.list).hide)
+  eq(true, vim.api.nvim_win_get_config(state.win.sidebar).hide)
+  eq(state.win.reader, vim.api.nvim_get_current_win())
+  eq(
+    vim.api.nvim_win_get_width(state.win.sidebar) + vim.api.nvim_win_get_width(state.win.list) + 2,
+    vim.api.nvim_win_get_width(state.win.reader)
+  )
+  eq(" 1 of 4 · q back · [[ prev · ]] next ", vim.api.nvim_win_get_config(state.win.reader).footer[1][1])
   local text = table.concat(vim.api.nvim_buf_get_lines(state.buf.reader, 0, -1, false), "\n")
   eq(
     true,
@@ -197,6 +205,12 @@ describe("e2e: accepting sends an iCalendar REPLY to the organizer", function()
   eq(true, ics:find("METHOD:REPLY", 1, true) ~= nil)
   eq(true, ics:find("ATTENDEE;CN=Test User;PARTSTAT=ACCEPTED:mailto:me@example.com", 1, true) ~= nil)
   keys("q")
+end)
+
+describe("e2e: q leaves the message and brings the folders and list back", function()
+  eq(false, vim.api.nvim_win_get_config(state.win.list).hide)
+  eq(false, vim.api.nvim_win_get_config(state.win.sidebar).hide)
+  eq(state.win.list, vim.api.nvim_get_current_win())
 end)
 
 describe("e2e: recipient headers complete addresses from the notmuch index", function()
