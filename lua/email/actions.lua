@@ -53,6 +53,7 @@ M.descriptions = {
   mark = "Toggle mark",
   mark_all = "Mark all on page",
   unmark_all = "Clear marks",
+  undo = "Undo the last move, delete or send",
   send = "Send",
   discard = "Discard",
 }
@@ -300,13 +301,32 @@ local function neighbour(affected)
   return nil
 end
 
-local function relocate(messages, folder_of, label)
+local function sync_soon()
+  local cmd = state.config.sync_cmd
+  if cmd then
+    vim.system(cmd, {}, function() end)
+  end
+end
+
+local function retag_inbox(into, out_of)
+  if #into > 0 then
+    notmuch.tag(into, { "+inbox" })
+  end
+  if #out_of > 0 then
+    notmuch.tag(out_of, { "-inbox" })
+  end
+end
+
+local function relocate(messages, destination, label)
   local ids = ids_of(messages)
   local affected = {}
   for _, id in ipairs(ids) do
     affected[id] = true
   end
   local keep = neighbour(affected)
+  local stash = vim.fn.tempname()
+  vim.fn.mkdir(stash, "p")
+  local undo = { label = label, journal = {}, into_inbox = {}, out_of_inbox = {} }
   layout.with_busy(label, function()
     local files = notmuch.files_by_id(ids)
     local into_inbox, out_of_inbox = {}, {}
@@ -314,31 +334,37 @@ local function relocate(messages, folder_of, label)
       for _, message in ipairs(messages) do
         local account = compose.account_of_message(message)
         local root = compose.root(account)
-        local folder = folder_of(account)
+        local own = files[message.id]
+        local was_in_inbox = vim.iter(own):any(function(file)
+          return maildir.split(file, root) == account.inbox
+        end)
+        local folder = destination(account, own, root)
         if folder then
-          maildir.move(files[message.id], root, folder)
+          maildir.move(own, root, folder, stash, undo.journal)
           table.insert(folder == account.inbox and into_inbox or out_of_inbox, message.id)
         else
-          maildir.unlink(files[message.id], root)
+          maildir.unlink(own, root, stash, undo.journal)
         end
+        table.insert(was_in_inbox and undo.into_inbox or undo.out_of_inbox, message.id)
       end
     end)
     notmuch.reindex()
-    if #into_inbox > 0 then
-      notmuch.tag(into_inbox, { "+inbox" })
-    end
-    if #out_of_inbox > 0 then
-      notmuch.tag(out_of_inbox, { "-inbox" })
-    end
+    retag_inbox(into_inbox, out_of_inbox)
     if not ok then
       error(err, 0)
     end
   end)
+  state.undo = undo
   state.marked = {}
   if state.current and affected[state.current.id] then
     layout.close_reader()
   end
   M.reload(keep)
+  sync_soon()
+end
+
+local function in_trash(account, own, root)
+  return account.trash ~= nil and maildir.in_folder(own, root, account.trash)
 end
 
 local function single_account(messages)
@@ -478,11 +504,35 @@ M.handlers = {
   end,
   delete = function()
     local messages = targets()
-    if vim.fn.confirm(("Delete %s?"):format(count_label(messages)), "&Delete\n&Cancel", 2) == 1 then
-      relocate(messages, function()
-        return nil
-      end, "Deleting")
+    local files = notmuch.files_by_id(ids_of(messages))
+    local permanent = vim.iter(messages):any(function(message)
+      local account = compose.account_of_message(message)
+      return account.trash == nil or in_trash(account, files[message.id], compose.root(account))
+    end)
+    if permanent then
+      local question = ("Permanently delete %s?"):format(count_label(messages))
+      if vim.fn.confirm(question, "&Delete\n&Cancel", 2) ~= 1 then
+        return
+      end
     end
+    relocate(messages, function(account, own, root)
+      if in_trash(account, own, root) then
+        return nil
+      end
+      return account.trash
+    end, "Deleting")
+  end,
+  undo = function()
+    local undo = state.undo or error("nothing to undo", 0)
+    state.undo = nil
+    layout.with_busy("Undoing", function()
+      maildir.undo(undo.journal)
+      notmuch.reindex()
+      retag_inbox(undo.into_inbox, undo.out_of_inbox)
+    end)
+    M.reload()
+    sync_soon()
+    vim.notify(("email.nvim: undid %s"):format(undo.label:lower()))
   end,
   move = function()
     local messages = targets()

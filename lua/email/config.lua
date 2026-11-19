@@ -70,6 +70,7 @@ M.defaults = {
       attachments = "<leader>ma",
       pipe = "<leader>mp",
       pick_folder = "<leader>mf",
+      undo = "U",
       accept = "<leader>my",
       decline = "<leader>mn",
       tentative = "<leader>mt",
@@ -107,6 +108,7 @@ local function validate_account(account, i)
     vim.validate(where .. "." .. key, account[key], "string")
   end
   vim.validate(where .. ".archive", account.archive, "string", true)
+  vim.validate(where .. ".trash", account.trash, "string", true)
   vim.validate(where .. ".addresses", account.addresses, "table")
   vim.validate(where .. ".folders", account.folders, "table")
   if #account.addresses == 0 then

@@ -57,6 +57,7 @@ require("email").setup({
       sent = "Sent",
       drafts = "Drafts",
       archive = "Archive",
+      trash = "Trash",
       folders = {
         { name = "Inbox", query = "folder:work/INBOX" },
         { name = "Sent", query = "folder:work/Sent" },
@@ -71,7 +72,7 @@ require("email").setup({
 })
 ```
 
-`maildir`, `inbox`, `sent`, `drafts` and `archive` are paths relative to the notmuch database root and to the
+`maildir`, `inbox`, `sent`, `drafts`, `archive` and `trash` are paths relative to the notmuch database root and to the
 account's maildir respectively. `addresses` decides which account a `From:` address belongs to.
 
 Then run `:Email`, `:EmailSearch <notmuch query>` or `:EmailCompose [address]`.
@@ -117,7 +118,7 @@ and the rarer actions live under `<leader>m`, so which-key lists them. Press `g?
 | Context | Key | Action |
 | --- | --- | --- |
 | list and message | `c` `r` `gr` `f` `e` | compose, reply, reply all, forward, edit draft |
-| | `a` `d` `m` | archive, delete, move (also on marked messages or a visual selection) |
+| | `a` `d` `m` `U` | archive, delete (to the account's `trash`; from the trash, or without one, permanently after asking), move, undo the last of these (also on marked messages or a visual selection) |
 | | `u` `*` | toggle unread, toggle flagged |
 | | `R` | sync (`sync_cmd`) |
 | | `<S-l>` `]b` / `<S-h>` `[b` | next / previous folder |

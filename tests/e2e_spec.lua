@@ -19,7 +19,7 @@ package.preload["snacks"] = function()
 end
 local root = vim.fn.tempname()
 local mail = root .. "/mail"
-for _, folder in ipairs({ "INBOX", "Sent", "Drafts", "Archive" }) do
+for _, folder in ipairs({ "INBOX", "Sent", "Drafts", "Archive", "Trash" }) do
   for _, sub in ipairs({ "cur", "new", "tmp" }) do
     vim.fn.mkdir(("%s/acct/%s/%s"):format(mail, folder, sub), "p")
   end
@@ -549,5 +549,62 @@ describe("e2e: clicking a link in a message opens it and the mouse is put back",
   eq({ "https://click.example" }, opened)
   keys("q")
   eq("", vim.o.mouse)
+  eq({}, errors)
+end)
+
+describe("e2e: delete moves to the trash, undo brings it back, and deleting from the trash is permanent", function()
+  require("email.ui.layout").close()
+  state.config.accounts[1].trash = "Trash"
+  write(
+    mail .. "/acct/INBOX/new/1007.x,U=7",
+    "From: Sender <s@example.org>\nTo: me@example.com\nSubject: Trash me\nMessage-ID: <trash@example.org>\n"
+      .. "Date: Thu, 19 Nov 2026 10:07:00 +0000\n\nbye\n"
+  )
+  assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
+  vim.cmd("EmailSearch id:trash@example.org")
+  wait("message", function()
+    return state.busy == 0 and #state.messages == 1
+  end)
+  local asked = 0
+  local confirm = vim.fn.confirm
+  vim.fn.confirm = function()
+    asked = asked + 1
+    return 1
+  end
+  focus_row(1)
+  keys("d")
+  wait("the move to the trash", function()
+    return #files("Trash") == 1 and state.busy == 0
+  end)
+  eq(0, asked)
+  eq(0, #vim.fn.glob(mail .. "/acct/INBOX/*/1007*", false, true))
+  local tags = vim.system({ "notmuch", "search", "--output=tags", "id:trash@example.org" }):wait().stdout
+  eq(nil, tags:find("inbox", 1, true))
+
+  keys("U")
+  wait("the undo", function()
+    return #files("Trash") == 0 and state.busy == 0
+  end)
+  eq(1, #vim.fn.glob(mail .. "/acct/INBOX/cur/1007*", false, true))
+  tags = vim.system({ "notmuch", "search", "--output=tags", "id:trash@example.org" }):wait().stdout
+  eq(true, tags:find("inbox", 1, true) ~= nil)
+
+  keys("d")
+  wait("the second move to the trash", function()
+    return #files("Trash") == 1 and state.busy == 0
+  end)
+  vim.cmd("EmailSearch id:trash@example.org")
+  wait("message in the trash", function()
+    return state.busy == 0 and #state.messages == 1
+  end)
+  focus_row(1)
+  keys("d")
+  wait("the permanent delete", function()
+    return #files("Trash") == 0 and state.busy == 0
+  end)
+  eq(1, asked)
+  eq("", vim.trim(vim.system({ "notmuch", "search", "id:trash@example.org" }):wait().stdout))
+  vim.fn.confirm = confirm
+  state.config.accounts[1].trash = nil
   eq({}, errors)
 end)
