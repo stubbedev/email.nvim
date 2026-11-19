@@ -56,6 +56,21 @@ local function walk(part, preference, blocks, attachments)
   end
 end
 
+local CALENDAR_TYPES = { ["text/calendar"] = true, ["application/ics"] = true }
+
+local function collect_calendars(part, out)
+  if CALENDAR_TYPES[content_type(part)] then
+    out[#out + 1] = type(part.content) == "string" and { content = part.content } or { part = part.id }
+  end
+  if type(part.content) == "table" then
+    for _, child in ipairs(part.content) do
+      if child["content-type"] then
+        collect_calendars(child, out)
+      end
+    end
+  end
+end
+
 local function tag_set(tags)
   local set = {}
   for _, tag in ipairs(tags or {}) do
@@ -76,9 +91,10 @@ end
 
 function M.message(raw, preference)
   local message = M.summary(raw)
-  message.blocks, message.attachments = {}, {}
+  message.blocks, message.attachments, message.calendars = {}, {}, {}
   for _, part in ipairs(raw.body or {}) do
     walk(part, preference, message.blocks, message.attachments)
+    collect_calendars(part, message.calendars)
   end
   return message
 end

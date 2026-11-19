@@ -2,6 +2,7 @@ local state = {}
 state.page = 1
 state.total = 0
 state.messages = {}
+state.marked = {}
 state.unread = {}
 state.reading = false
 state.win = {}

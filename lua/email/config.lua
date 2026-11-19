@@ -14,7 +14,26 @@ M.defaults = {
   height = 0.9,
   sidebar_width = 30,
   list_ratio = 0.4,
-  icons = { unread = "●", flagged = "★", replied = "↩", attachment = "󰁦" },
+  devicons = false,
+  icons = {
+    unread = "●",
+    flagged = "\u{f04ce}",
+    replied = "\u{f045a}",
+    attachment = "\u{f03e2}",
+    marked = "▍",
+    invite = "\u{f00ef}",
+  },
+  folder_icons = {
+    account = "\u{f01f0}",
+    inbox = "\u{f0687}",
+    sent = "\u{f048a}",
+    drafts = "\u{f0cb6}",
+    archive = "\u{f003c}",
+    junk = "\u{f0ce6}",
+    trash = "\u{f0a7a}",
+    folder = "\u{f0256}",
+    search = "\u{f0349}",
+  },
   keymaps = {
     global = {
       help = "g?",
@@ -35,6 +54,9 @@ M.defaults = {
       next_folder = { "<Tab>", "]f" },
       prev_folder = { "<S-Tab>", "[f" },
       pick_folder = "gF",
+      accept = "gy",
+      decline = "gn",
+      tentative = "gm",
     },
     list = {
       open = "<CR>",
@@ -43,6 +65,9 @@ M.defaults = {
       prev_page = "[[",
       focus_sidebar = "<C-h>",
       focus_reader = "<C-j>",
+      mark = "v",
+      mark_all = "<C-a>",
+      unmark_all = "<Esc>",
     },
     reader = {
       close_reader = "q",
@@ -118,6 +143,12 @@ function M.resolve(opts, actions)
   vim.validate("sync_cmd", config.sync_cmd, "table", true)
   vim.validate("page_size", config.page_size, "number")
   vim.validate("refresh_interval", config.refresh_interval, "number")
+  vim.validate("devicons", config.devicons, "boolean")
+  vim.validate("icons", config.icons, "table")
+  vim.validate("folder_icons", config.folder_icons, "table")
+  if config.devicons then
+    require("nvim-web-devicons")
+  end
   validate_keymaps(config.keymaps, actions)
   config.downloads_dir = vim.fs.normalize(config.downloads_dir)
   return config

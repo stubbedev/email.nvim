@@ -71,17 +71,25 @@ function M.encode_word(s)
   return table.concat(chunks, "\n ")
 end
 
-function M.format_address(address)
+local function render_address(address, encode)
   if not address.name then
     return address.addr
   end
   local name = address.name
-  if not is_ascii(name) then
+  if encode and not is_ascii(name) then
     name = M.encode_word(name)
   elseif name:find('[()<>%[%]:;@\\,."]') then
     name = '"' .. name:gsub('(["\\])', "\\%1") .. '"'
   end
   return name .. " <" .. address.addr .. ">"
+end
+
+function M.format_address(address)
+  return render_address(address, true)
+end
+
+function M.display_address(address)
+  return render_address(address, false)
 end
 
 function M.header_value(name, value)
@@ -186,13 +194,35 @@ local function base64_lines(data)
   return table.concat(lines, "\n")
 end
 
+local function body_entity(message)
+  local part_headers, body = text_part(message.body)
+  if #message.alternatives == 0 then
+    return part_headers, body
+  end
+  local boundary = message.boundary .. ".alt"
+  local out = { "--" .. boundary }
+  vim.list_extend(out, part_headers)
+  out[#out + 1] = ""
+  out[#out + 1] = body
+  for _, alternative in ipairs(message.alternatives) do
+    out[#out + 1] = "--" .. boundary
+    out[#out + 1] = "Content-Type: " .. alternative.content_type
+    out[#out + 1] = "Content-Transfer-Encoding: base64"
+    out[#out + 1] = ""
+    out[#out + 1] = base64_lines(alternative.data)
+  end
+  out[#out + 1] = "--" .. boundary .. "--"
+  out[#out + 1] = ""
+  return { ('Content-Type: multipart/alternative; boundary="%s"'):format(boundary) }, table.concat(out, "\n")
+end
+
 function M.build(message)
   local out = {}
   for _, header in ipairs(message.headers) do
     out[#out + 1] = header[1] .. ": " .. M.header_value(header[1], header[2])
   end
   out[#out + 1] = "MIME-Version: 1.0"
-  local part_headers, body = text_part(message.body)
+  local part_headers, body = body_entity(message)
   if #message.attachments == 0 then
     vim.list_extend(out, part_headers)
     out[#out + 1] = ""

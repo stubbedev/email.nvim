@@ -52,6 +52,7 @@ describe("build emits a single text part when there are no attachments", functio
     headers = { { "From", "Me <me@x.y>" }, { "Subject", "Hi" } },
     body = "hello",
     attachments = {},
+    alternatives = {},
     boundary = "B",
   })
   eq(
@@ -66,6 +67,7 @@ describe("build wraps attachments in multipart/mixed with base64 bodies", functi
     headers = { { "Subject", "Fil" } },
     body = "se vedhæftet",
     attachments = { { filename = "rapport ø.pdf", data = "PDFDATA" } },
+    alternatives = {},
     boundary = "XYZ",
   })
   eq(true, out:find('Content-Type: multipart/mixed; boundary="XYZ"', 1, true) ~= nil)
@@ -73,4 +75,29 @@ describe("build wraps attachments in multipart/mixed with base64 bodies", functi
   eq(true, out:find("filename*=UTF-8''rapport%20%C3%B8.pdf", 1, true) ~= nil)
   eq(true, out:find(vim.base64.encode("PDFDATA"), 1, true) ~= nil)
   eq(true, out:find("\n%-%-XYZ%-%-\n$") ~= nil)
+end)
+
+describe("build nests a multipart/alternative calendar part inside multipart/mixed", function()
+  local out = mime.build({
+    headers = { { "Subject", "Accepted: Sync" } },
+    body = "ok",
+    attachments = { { filename = "a.txt", data = "A" } },
+    alternatives = { { content_type = "text/calendar; charset=utf-8; method=REPLY", data = "BEGIN:VCALENDAR\r\n" } },
+    boundary = "M",
+  })
+  eq(true, out:find('Content-Type: multipart/mixed; boundary="M"', 1, true) ~= nil)
+  eq(true, out:find('\n--M\nContent-Type: multipart/alternative; boundary="M.alt"\n\n--M.alt\n', 1, true) ~= nil)
+  eq(
+    true,
+    out:find("Content-Type: text/calendar; charset=utf-8; method=REPLY\nContent-Transfer-Encoding: base64", 1, true)
+      ~= nil
+  )
+  eq(true, out:find(vim.base64.encode("BEGIN:VCALENDAR\r\n"), 1, true) ~= nil)
+  eq(true, out:find("\n--M.alt--\n", 1, true) ~= nil)
+  eq(true, out:find("\n--M--\n$") ~= nil)
+end)
+
+describe("display_address quotes specials but keeps UTF-8 names readable", function()
+  eq("Søren <s@x.y>", mime.display_address({ name = "Søren", addr = "s@x.y" }))
+  eq('"Doe, Jane" <j@x.y>', mime.display_address({ name = "Doe, Jane", addr = "j@x.y" }))
 end)

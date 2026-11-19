@@ -3,6 +3,7 @@ local compose = require("email.compose")
 local composer = require("email.ui.composer")
 local format = require("email.format")
 local help = require("email.ui.help")
+local ical = require("email.ical")
 local layout = require("email.ui.layout")
 local list = require("email.ui.list")
 local maildir = require("email.maildir")
@@ -45,6 +46,12 @@ M.descriptions = {
   prev_message = "Previous message",
   focus_list = "Focus list",
   select_folder = "Open folder",
+  accept = "Accept invite",
+  decline = "Decline invite",
+  tentative = "Tentatively accept invite",
+  mark = "Toggle mark",
+  mark_all = "Mark all on page",
+  unmark_all = "Clear marks",
   send = "Send",
   discard = "Discard",
 }
@@ -109,22 +116,88 @@ local function full(message)
   return parse.message(notmuch.show(message.id), state.config.alternatives)
 end
 
-local function update_tags(id, changes)
-  notmuch.tag({ id }, changes)
+local function in_visual()
+  local mode = vim.fn.mode()
+  return mode == "v" or mode == "V" or mode == "\22"
+end
+
+local function visual_rows()
+  local first, last = vim.fn.line("v"), vim.fn.line(".")
+  if first > last then
+    first, last = last, first
+  end
+  vim.api.nvim_feedkeys(vim.keycode("<Esc>"), "nx", false)
+  return first, last
+end
+
+local function targets()
+  if vim.api.nvim_get_current_win() == state.win.reader and state.current then
+    return { state.current }
+  end
+  local out = {}
+  if in_visual() then
+    local first, last = visual_rows()
+    for row = first, last do
+      out[#out + 1] = state.messages[row]
+    end
+    return out
+  end
   for _, message in ipairs(state.messages) do
-    if message.id == id then
+    if state.marked[message.id] then
+      out[#out + 1] = message
+    end
+  end
+  if #out > 0 then
+    return out
+  end
+  return { target() }
+end
+
+local function ids_of(messages)
+  local ids = {}
+  for i, message in ipairs(messages) do
+    ids[i] = message.id
+  end
+  return ids
+end
+
+local function update_tags(ids, changes)
+  notmuch.tag(ids, changes)
+  local affected = {}
+  for _, id in ipairs(ids) do
+    affected[id] = true
+  end
+  local function apply(message)
+    if message and affected[message.id] then
       for _, change in ipairs(changes) do
         message.tags[change:sub(2)] = change:sub(1, 1) == "+" or nil
       end
     end
   end
-  if state.current and state.current.id == id then
-    for _, change in ipairs(changes) do
-      state.current.tags[change:sub(2)] = change:sub(1, 1) == "+" or nil
-    end
+  for _, message in ipairs(state.messages) do
+    apply(message)
   end
+  apply(state.current)
   list.render()
   M.refresh_counts()
+end
+
+local function toggle_tag(tag)
+  local messages = targets()
+  local any = false
+  for _, message in ipairs(messages) do
+    any = any or message.tags[tag] == true
+  end
+  state.marked = {}
+  update_tags(ids_of(messages), { (any and "-" or "+") .. tag })
+end
+
+local function invite_of(message)
+  if #message.calendars == 0 then
+    return nil
+  end
+  local calendar = ical.parse(compose.invite_text(message.id, message))
+  return { summary = ical.summary(calendar), method = calendar.method }
 end
 
 local function show(summary)
@@ -132,13 +205,13 @@ local function show(summary)
     local message = parse.message(notmuch.show(summary.id), state.config.alternatives)
     local body = render.body(message, state.config.renderers)
     state.current = message
-    local buf = reader.show(message, body)
+    local buf = reader.show(message, body, invite_of(message))
     if not vim.b[buf].email_bound then
       M.bind(buf, { "global", "reader" })
       vim.b[buf].email_bound = true
     end
     if message.tags.unread then
-      update_tags(message.id, { "-unread" })
+      update_tags({ message.id }, { "-unread" })
     end
   end)
   layout.focus("reader")
@@ -147,42 +220,92 @@ end
 local function set_folder(folder)
   state.folder = folder
   state.page = 1
+  state.marked = {}
   if state.reading then
     layout.close_reader()
   end
   M.reload()
 end
 
-local function neighbour(id)
+local function neighbour(affected)
+  local last
   for i, message in ipairs(state.messages) do
-    if message.id == id then
-      local next_message = state.messages[i + 1] or state.messages[i - 1]
-      return next_message and next_message.id
+    if affected[message.id] then
+      last = i
+    end
+  end
+  if not last then
+    return nil
+  end
+  for i = last + 1, #state.messages do
+    if not affected[state.messages[i].id] then
+      return state.messages[i].id
+    end
+  end
+  for i = last - 1, 1, -1 do
+    if not affected[state.messages[i].id] then
+      return state.messages[i].id
     end
   end
   return nil
 end
 
-local function relocate(message, folder)
-  local account = compose.account_of_message(message)
-  local root = compose.root(account)
-  local keep = neighbour(message.id)
-  layout.with_busy(folder and "Moving" or "Deleting", function()
-    local files = notmuch.files(message.id)
-    if folder then
-      maildir.move(files, root, folder)
-    else
-      maildir.unlink(files, root)
-    end
+local function relocate(messages, folder_of, label)
+  local ids = ids_of(messages)
+  local affected = {}
+  for _, id in ipairs(ids) do
+    affected[id] = true
+  end
+  local keep = neighbour(affected)
+  layout.with_busy(label, function()
+    local files = notmuch.files_by_id(ids)
+    local into_inbox, out_of_inbox = {}, {}
+    local ok, err = pcall(function()
+      for _, message in ipairs(messages) do
+        local account = compose.account_of_message(message)
+        local root = compose.root(account)
+        local folder = folder_of(account)
+        if folder then
+          maildir.move(files[message.id], root, folder)
+          table.insert(folder == account.inbox and into_inbox or out_of_inbox, message.id)
+        else
+          maildir.unlink(files[message.id], root)
+        end
+      end
+    end)
     notmuch.reindex()
-    if folder then
-      notmuch.tag({ message.id }, { folder == account.inbox and "+inbox" or "-inbox" })
+    if #into_inbox > 0 then
+      notmuch.tag(into_inbox, { "+inbox" })
+    end
+    if #out_of_inbox > 0 then
+      notmuch.tag(out_of_inbox, { "-inbox" })
+    end
+    if not ok then
+      error(err, 0)
     end
   end)
-  if state.current and state.current.id == message.id then
+  state.marked = {}
+  if state.current and affected[state.current.id] then
     layout.close_reader()
   end
   M.reload(keep)
+end
+
+local function single_account(messages)
+  local account
+  for _, message in ipairs(messages) do
+    local owner = compose.account_of_message(message)
+    if account and owner ~= account then
+      error("the selected messages belong to different accounts", 0)
+    end
+    account = owner
+  end
+  return account
+end
+
+local function count_label(messages)
+  return #messages == 1 and ("%q"):format(format.oneline(messages[1].headers.Subject))
+    or ("%d messages"):format(#messages)
 end
 
 local function open_composer(draft)
@@ -271,32 +394,72 @@ M.handlers = {
     prepare(compose.edit, target().id)
   end,
   archive = function()
-    local message = target()
-    local account = compose.account_of_message(message)
-    relocate(message, account.archive or error(("account %s has no archive folder"):format(account.name), 0))
+    relocate(targets(), function(account)
+      return account.archive or error(("account %s has no archive folder"):format(account.name), 0)
+    end, "Archiving")
   end,
   delete = function()
-    local message = target()
-    local subject = format.oneline(message.headers.Subject)
-    if vim.fn.confirm(("Delete %q?"):format(subject), "&Delete\n&Cancel", 2) == 1 then
-      relocate(message, nil)
+    local messages = targets()
+    if vim.fn.confirm(("Delete %s?"):format(count_label(messages)), "&Delete\n&Cancel", 2) == 1 then
+      relocate(messages, function()
+        return nil
+      end, "Deleting")
     end
   end,
   move = function()
-    local message = target()
-    local account = compose.account_of_message(message)
-    local folder = async.select(maildir.folders(compose.root(account)), { prompt = "Move to" })
+    local messages = targets()
+    local account = single_account(messages)
+    local folder =
+      async.select(maildir.folders(compose.root(account)), { prompt = "Move " .. count_label(messages) .. " to" })
     if folder then
-      relocate(message, folder)
+      relocate(messages, function()
+        return folder
+      end, "Moving")
     end
   end,
   toggle_unread = function()
-    local message = target()
-    update_tags(message.id, { message.tags.unread and "-unread" or "+unread" })
+    toggle_tag("unread")
   end,
   toggle_flagged = function()
-    local message = target()
-    update_tags(message.id, { message.tags.flagged and "-flagged" or "+flagged" })
+    toggle_tag("flagged")
+  end,
+  accept = function()
+    prepare(compose.calendar_reply, target().id, "ACCEPTED")
+  end,
+  decline = function()
+    prepare(compose.calendar_reply, target().id, "DECLINED")
+  end,
+  tentative = function()
+    prepare(compose.calendar_reply, target().id, "TENTATIVE")
+  end,
+  mark = function()
+    if in_visual() then
+      local first, last = visual_rows()
+      for row = first, last do
+        local message = state.messages[row]
+        state.marked[message.id] = not state.marked[message.id] or nil
+      end
+      list.render()
+      return
+    end
+    local message = list.selected()
+    if not message then
+      return
+    end
+    state.marked[message.id] = not state.marked[message.id] or nil
+    local row = vim.api.nvim_win_get_cursor(state.win.list)[1]
+    list.render()
+    vim.api.nvim_win_set_cursor(state.win.list, { math.min(row + 1, math.max(1, #state.messages)), 0 })
+  end,
+  mark_all = function()
+    for _, message in ipairs(state.messages) do
+      state.marked[message.id] = true
+    end
+    list.render()
+  end,
+  unmark_all = function()
+    state.marked = {}
+    list.render()
   end,
   attachments = function()
     local message = full(target())
@@ -307,7 +470,12 @@ M.handlers = {
     local attachment = async.select(message.attachments, {
       prompt = "Attachment",
       format_item = function(a)
-        return ("%s (%s, %s)"):format(a.filename, a.content_type, format.size(a.size))
+        return ("%s %s (%s, %s)"):format(
+          format.file_icon(a.filename, state.config),
+          a.filename,
+          a.content_type,
+          format.size(a.size)
+        )
       end,
     })
     if not attachment then
@@ -390,12 +558,14 @@ M.handlers = {
   next_page = function()
     if state.page * state.config.page_size < state.total then
       state.page = state.page + 1
+      state.marked = {}
       M.reload()
     end
   end,
   prev_page = function()
     if state.page > 1 then
       state.page = state.page - 1
+      state.marked = {}
       M.reload()
     end
   end,
@@ -439,13 +609,17 @@ for context, maps in pairs(require("email.config").defaults.keymaps) do
   end
 end
 
+local BATCH = { archive = true, delete = true, move = true, toggle_unread = true, toggle_flagged = true, mark = true }
+
 function M.bind(buf, contexts)
+  local visual = buf == state.buf.list
   for _, context in ipairs(contexts) do
     for action, lhs in pairs(state.config.keymaps[context]) do
       if lhs then
         local handler = M.handlers[action]
+        local modes = (visual and BATCH[action]) and { "n", "x" } or "n"
         for _, key in ipairs(type(lhs) == "table" and lhs or { lhs }) do
-          vim.keymap.set("n", key, function()
+          vim.keymap.set(modes, key, function()
             async.run(handler)
           end, { buffer = buf, nowait = true, desc = "email: " .. M.descriptions[action] })
         end

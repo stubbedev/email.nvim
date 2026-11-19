@@ -7,48 +7,73 @@ local M = {}
 
 local HEADERS = { "From", "To", "Cc", "Subject" }
 local LABEL_WIDTH = 9
+local INVITE_ACTIONS = { { "accept", "accept" }, { "decline", "decline" }, { "tentative", "maybe" } }
 
-local function header_line(label, value)
-  return format.fit(label .. ":", LABEL_WIDTH) .. " " .. format.oneline(value)
+local function first_key(lhs)
+  return type(lhs) == "table" and lhs[1] or lhs
 end
 
-function M.lines(message, body, width)
-  local lines, labels = {}, {}
+local function invite_hint(keymaps)
+  local hints = {}
+  for _, action in ipairs(INVITE_ACTIONS) do
+    local key = first_key(keymaps[action[1]])
+    if key then
+      hints[#hints + 1] = key .. " " .. action[2]
+    end
+  end
+  return table.concat(hints, " · ")
+end
+
+function M.lines(message, body, width, invite, config)
+  local lines, highlights = {}, {}
+  local label_pad = string.rep(" ", LABEL_WIDTH + 1)
   local function add(label, value)
-    lines[#lines + 1] = header_line(label, value)
-    labels[#lines] = #label + 1
+    lines[#lines + 1] = format.fit(label .. ":", LABEL_WIDTH) .. " " .. value
+    highlights[#highlights + 1] = { #lines, 0, #label + 1, "EmailHeader" }
   end
   for _, name in ipairs(HEADERS) do
     local value = message.headers[name]
     if value and value ~= "" then
-      add(name, value)
+      add(name, format.oneline(value))
     end
   end
   add("Date", os.date("%Y-%m-%d %H:%M", message.timestamp))
-  if #message.attachments > 0 then
-    local names = {}
-    for i, attachment in ipairs(message.attachments) do
-      names[i] = ("%s (%s)"):format(attachment.filename, format.size(attachment.size))
+  if invite then
+    local summary = invite.summary or "(untitled event)"
+    local text = config.icons.invite .. " " .. summary
+    if invite.method == "REQUEST" then
+      text = text .. "  (" .. invite_hint(config.keymaps.global) .. ")"
     end
-    add("Files", table.concat(names, ", "))
+    add("Invite", text)
+    local start = LABEL_WIDTH + 1
+    highlights[#highlights + 1] = { #lines, start, start + #config.icons.invite + 1 + #summary, "EmailInvite" }
+  end
+  for i, attachment in ipairs(message.attachments) do
+    local icon, icon_hl = format.file_icon(attachment.filename, config)
+    local entry = ("%s %s (%s)"):format(icon, attachment.filename, format.size(attachment.size))
+    if i == 1 then
+      add("Files", entry)
+    else
+      lines[#lines + 1] = label_pad .. entry
+    end
+    highlights[#highlights + 1] = { #lines, LABEL_WIDTH + 1, LABEL_WIDTH + 1 + #icon, icon_hl }
   end
   lines[#lines + 1] = string.rep("─", width)
-  local separator = #lines
+  highlights[#highlights + 1] = { #lines, 0, #lines[#lines], "EmailSeparator" }
   lines[#lines + 1] = ""
   vim.list_extend(lines, body)
-  return lines, labels, separator
+  return lines, highlights
 end
 
-function M.show(message, body)
+function M.show(message, body, invite)
   local buf = layout.open_reader()
   local width = vim.api.nvim_win_get_width(state.win.reader)
-  local lines, labels, separator = M.lines(message, body, width)
+  local lines, highlights = M.lines(message, body, width, invite, state.config)
   layout.set_lines(buf, lines)
   vim.api.nvim_buf_clear_namespace(buf, highlight.ns, 0, -1)
-  for row, len in pairs(labels) do
-    highlight.apply(buf, row - 1, { { 0, len, "EmailHeader" } })
+  for _, hl in ipairs(highlights) do
+    highlight.apply(buf, hl[1] - 1, { { hl[2], hl[3], hl[4] } })
   end
-  highlight.apply(buf, separator - 1, { { 0, #lines[separator], "EmailSeparator" } })
   if not vim.b[buf].email_treesitter then
     vim.treesitter.start(buf, "markdown")
     vim.b[buf].email_treesitter = true

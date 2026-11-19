@@ -1,3 +1,4 @@
+local addresses = require("email.addresses")
 local async = require("email.async")
 
 local M = {}
@@ -63,6 +64,9 @@ function M.open(draft, handlers, keymaps, border)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, M.lines(draft))
   vim.bo[buf].modified = false
   vim.bo[buf].filetype = "mail"
+  vim.bo[buf].omnifunc = "v:lua.require'email.addresses'.omnifunc"
+  vim.b[buf].email_composer = true
+  addresses.refresh()
 
   local width = math.floor(vim.o.columns * 0.8)
   local height = math.floor((vim.o.lines - vim.o.cmdheight) * 0.8)
@@ -75,7 +79,11 @@ function M.open(draft, handlers, keymaps, border)
     border = border,
     title = " Compose ",
     title_pos = "center",
-    footer = (" %s send · :w save draft · %s discard "):format(keymaps.send or "-", keymaps.discard or "-"),
+    footer = (" %s%s send · :w save draft · %s discard "):format(
+      draft.calendar and ("calendar reply: " .. draft.calendar.label .. " · ") or "",
+      keymaps.send or "-",
+      keymaps.discard or "-"
+    ),
     footer_pos = "center",
     zindex = 60,
   })

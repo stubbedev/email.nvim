@@ -15,6 +15,14 @@ listing, searching and opening mail is instant on a local Maildir kept in sync b
   account's Sent folder with `notmuch insert`.
 - Archive, move and delete move or remove the Maildir files themselves, so your sync tool carries the change to
   the server.
+- Calendar invitations get an **Invite** row; accept, decline or tentatively accept sends an iCalendar `METHOD:REPLY`
+  to the organizer, threaded to the invite.
+- Archive, delete, move and the unread/flagged toggles work on **several messages at once**: mark them with `v`, or
+  select rows in visual mode.
+- **Address completion** in `To`, `Cc`, `Bcc` and `Reply-To`, ranked from the notmuch index (people you have written to
+  first): built in as `omnifunc` (`<C-x><C-o>`) and as a [blink.cmp](https://github.com/saghen/blink.cmp) source.
+- Optional [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) file icons for attachments, and Nerd
+  Font icons for folders and flags.
 - Saves and opens attachments, pipes a message into a shell command (unsubscribe scripts, patch tools), and refreshes
   when the notmuch database changes.
 
@@ -59,6 +67,15 @@ account's maildir respectively. `addresses` decides which account a `From:` addr
 
 Then run `:Email`, `:EmailSearch <notmuch query>` or `:EmailCompose [address]`.
 
+### blink.cmp
+
+```lua
+require("blink.cmp").add_source_provider("email", { name = "Email", module = "email.blink" })
+require("blink.cmp").add_filetype_source("mail", "email")
+```
+
+The source only answers inside email.nvim's composer, on recipient headers.
+
 ## Options
 
 | Option | Default | |
@@ -72,7 +89,9 @@ Then run `:Email`, `:EmailSearch <notmuch query>` or `:EmailCompose [address]`.
 | `refresh_interval` | `5000` | ms between checks of the notmuch database for changes; `0` disables |
 | `downloads_dir` | `~/Downloads` | Where saved attachments go |
 | `border`, `width`, `height`, `sidebar_width`, `list_ratio` | `"rounded"`, `0.9`, `0.9`, `30`, `0.4` | Layout |
-| `icons` | `● ★ ↩ 󰁦` | `unread`, `flagged`, `replied`, `attachment` |
+| `devicons` | `false` | File icons for attachments from nvim-web-devicons (must be installed when `true`) |
+| `icons` | Nerd Font glyphs | `unread`, `flagged`, `replied`, `attachment`, `marked`, `invite` |
+| `folder_icons` | Nerd Font glyphs | `account`, `inbox`, `sent`, `drafts`, `archive`, `junk`, `trash`, `folder`, `search`; a folder's role comes from its name |
 | `keymaps` | see below | Per context, action → key, list of keys or `false` |
 
 ## Keys
@@ -86,8 +105,10 @@ Press `g?` inside the client for the live list.
 | | `u` `s` | toggle unread, toggle flagged |
 | | `ga` `\|` | open or save attachment, pipe message to a command |
 | | `/` `gs` | notmuch search, sync |
+| | `gy` `gn` `gm` | accept, decline, tentatively accept an invite |
 | | `<Tab>` `<S-Tab>` `gF` | next, previous, pick folder |
 | list | `<CR>` `q` `]]` `[[` | open, quit, next and previous page |
+| | `v` `<C-a>` `<Esc>` | toggle mark (or mark the visual selection), mark all on the page, clear marks |
 | message | `q` `J` `K` | close, next and previous message |
 | folders | `<CR>` | open folder |
 | composer | `<C-s>` `<C-q>` `:w` | send, discard, save draft |
@@ -96,7 +117,7 @@ Press `g?` inside the client for the live list.
 
 `EmailUnread`, `EmailFlagged`, `EmailReplied`, `EmailAttachment`, `EmailSender`, `EmailSenderUnread`,
 `EmailSubject`, `EmailSubjectUnread`, `EmailDate`, `EmailAccount`, `EmailFolder`, `EmailFolderActive`, `EmailCount`,
-`EmailHeader`, `EmailSeparator`.
+`EmailHeader`, `EmailSeparator`, `EmailMarked`, `EmailMarker`, `EmailFolderIcon`, `EmailAccountIcon`, `EmailInvite`.
 
 ## Development
 

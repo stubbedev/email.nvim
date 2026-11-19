@@ -71,12 +71,13 @@ local function icon_width(icons)
   return width
 end
 
-function M.row(message, width, icons, now)
+function M.row(message, width, icons, now, marked)
   local iw = icon_width(icons)
   local segments = {}
   local status, status_hl = M.status_icon(message.tags, icons)
   local unread = message.tags.unread
-  segments[#segments + 1] = { " " .. M.fit(status, iw) .. " ", status_hl }
+  segments[#segments + 1] = { marked and M.fit(icons.marked, 1) or " ", marked and "EmailMarker" or nil }
+  segments[#segments + 1] = { M.fit(status, iw) .. " ", status_hl }
   segments[#segments + 1] = { M.fit(message.tags.attachment and icons.attachment or "", iw) .. " ", "EmailAttachment" }
   segments[#segments + 1] = {
     M.fit(M.oneline(M.sender(message.headers.From)), SENDER_WIDTH) .. "  ",
@@ -105,6 +106,36 @@ function M.row(message, width, icons, now)
     col = col + #segment[1]
   end
   return table.concat(text), highlights
+end
+
+local FOLDER_ROLES = {
+  inbox = "inbox",
+  sent = "sent",
+  ["sent items"] = "sent",
+  ["sent mail"] = "sent",
+  drafts = "drafts",
+  draft = "drafts",
+  archive = "archive",
+  ["all mail"] = "archive",
+  junk = "junk",
+  ["junk mail"] = "junk",
+  spam = "junk",
+  trash = "trash",
+  bin = "trash",
+  deleted = "trash",
+  ["deleted items"] = "trash",
+}
+
+function M.folder_icon(name, icons)
+  return icons[FOLDER_ROLES[name:lower()] or "folder"]
+end
+
+function M.file_icon(filename, config)
+  if not config.devicons then
+    return config.icons.attachment, "EmailAttachment"
+  end
+  local icon, hl = require("nvim-web-devicons").get_icon(filename, filename:match("%.([^.]+)$"), { default = true })
+  return icon, hl
 end
 
 function M.size(bytes)

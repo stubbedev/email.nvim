@@ -18,6 +18,11 @@ local GROUPS = {
   EmailCount = { link = "DiagnosticInfo" },
   EmailHeader = { link = "Label" },
   EmailSeparator = { link = "FloatBorder" },
+  EmailMarked = { link = "Visual" },
+  EmailMarker = { link = "DiagnosticHint" },
+  EmailFolderIcon = { link = "Special" },
+  EmailAccountIcon = { link = "Function" },
+  EmailInvite = { link = "DiagnosticOk" },
 }
 
 function M.setup()

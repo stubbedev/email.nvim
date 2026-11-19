@@ -124,11 +124,39 @@ function M.raw(id)
   return run({ "show", "--format=raw", "--", M.id_query(id) }, { binary = true })
 end
 
-function M.files(id)
-  return vim.split(vim.trim(run({ "search", "--output=files", "--exclude=false", "--", M.id_query(id) })), "\n", {
-    plain = true,
-    trimempty = true,
-  })
+function M.files_by_id(ids)
+  local files = {}
+  for _, message in
+    ipairs(shown(run({
+      "show",
+      "--format=json",
+      "--body=false",
+      "--entire-thread=false",
+      "--exclude=false",
+      "--",
+      M.ids_query(ids),
+    })))
+  do
+    files[message.id] = message.filename or {}
+  end
+  for _, id in ipairs(ids) do
+    if not files[id] then
+      error(("message %s is no longer in the notmuch database"):format(id), 0)
+    end
+  end
+  return files
+end
+
+function M.addresses(query, output)
+  return decode(run({
+    "address",
+    "--format=json",
+    "--output=" .. output,
+    "--output=count",
+    "--deduplicate=address",
+    "--",
+    query,
+  }))
 end
 
 function M.reply_headers(id, all)

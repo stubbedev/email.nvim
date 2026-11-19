@@ -1,4 +1,5 @@
 local async = require("email.async")
+local ical = require("email.ical")
 local layout = require("email.ui.layout")
 local maildir = require("email.maildir")
 local mime = require("email.mime")
@@ -174,7 +175,47 @@ function M.edit(id)
   }
 end
 
-local function finalize(parsed, hidden, require_recipients)
+local PARTSTAT_WORDS = {
+  ACCEPTED = { subject = "Accepted", verb = "accepted" },
+  DECLINED = { subject = "Declined", verb = "declined" },
+  TENTATIVE = { subject = "Tentative", verb = "tentatively accepted" },
+}
+
+function M.invite_text(id, message)
+  local calendar = message.calendars[1] or error("this message has no calendar invite", 0)
+  return calendar.content or notmuch.part(id, calendar.part)
+end
+
+function M.calendar_reply(id, partstat)
+  local words = PARTSTAT_WORDS[partstat] or error(("unknown participation status %s"):format(partstat), 0)
+  local message = parse.message(notmuch.show(id), state.config.alternatives)
+  local calendar = ical.parse(M.invite_text(id, message))
+  if calendar.method ~= "REQUEST" then
+    error(("the calendar part is %s, not an invitation (REQUEST)"):format(calendar.method or "missing its METHOD"), 0)
+  end
+  local reply = notmuch.reply_headers(id, false)
+  local me = mime.parse_addresses(reply.From or "")[1] or error("notmuch reply produced no From address", 0)
+  local to = reply.To or ""
+  local organizer = calendar.event and calendar.event.props.ORGANIZER
+  if organizer then
+    local name = organizer.params.CN and organizer.params.CN:gsub('^"(.*)"$', "%1")
+    to = mime.display_address({ name = name, addr = ical.mailto(organizer.value) })
+  end
+  return {
+    headers = {
+      From = reply.From,
+      To = to,
+      Cc = "",
+      Subject = words.subject .. ": " .. (ical.summary(calendar) or message.headers.Subject or ""),
+    },
+    hidden = { ["In-Reply-To"] = reply["In-reply-to"], References = reply.References },
+    body = { ("%s has %s the invitation."):format(me.name or me.addr, words.verb) },
+    reply_to = id,
+    calendar = { ics = ical.reply(calendar, me.addr, me.name, partstat, os.time()), label = words.subject },
+  }
+end
+
+local function finalize(parsed, draft, require_recipients)
   local from = mime.parse_addresses(parsed.headers.From or "")[1] or error("From is empty", 0)
   local domain = from.addr:match("@([^@]+)$") or error(("From address %q has no domain"):format(from.addr), 0)
   local account = M.account_for_address(from.addr)
@@ -199,8 +240,9 @@ local function finalize(parsed, hidden, require_recipients)
   end
   headers[#headers + 1] = { "Message-ID", message_id }
   for _, name in ipairs(THREAD_HEADERS) do
-    if hidden[name] and hidden[name] ~= "" then
-      headers[#headers + 1] = { name, hidden[name] }
+    local value = draft.hidden[name]
+    if value and value ~= "" then
+      headers[#headers + 1] = { name, value }
     end
   end
   local attachments = {}
@@ -213,6 +255,9 @@ local function finalize(parsed, hidden, require_recipients)
       headers = headers,
       body = parsed.body,
       attachments = attachments,
+      alternatives = draft.calendar and {
+        { content_type = "text/calendar; charset=utf-8; method=REPLY", data = draft.calendar.ics },
+      } or {},
       boundary = "=_" .. hex(vim.uv.random(12)),
     })
 end
@@ -221,7 +266,7 @@ local function remove_draft(draft)
   if not draft.draft_id then
     return
   end
-  local files = notmuch.files(draft.draft_id)
+  local files = notmuch.files_by_id({ draft.draft_id })[draft.draft_id]
   local removed = false
   for _, account in ipairs(state.config.accounts) do
     local root = M.root(account)
@@ -247,7 +292,7 @@ function M.send(session)
       return
     end
     local parsed = session.current()
-    local account, _, message = finalize(parsed, session.draft.hidden, true)
+    local account, _, message = finalize(parsed, session.draft, true)
     layout.with_busy("Sending", function()
       async.checked(state.config.send_cmd, { stdin = message })
       notmuch.insert(account.maildir .. "/" .. account.sent, message, { "+sent", "-inbox", "-unread" })
@@ -269,7 +314,7 @@ function M.save(session)
     end
     local ok, err = pcall(function()
       local parsed = session.current()
-      local account, message_id, message = finalize(parsed, session.draft.hidden, false)
+      local account, message_id, message = finalize(parsed, session.draft, false)
       notmuch.insert(account.maildir .. "/" .. account.drafts, message, { "+draft", "-inbox", "-unread" })
       remove_draft(session.draft)
       session.draft.draft_id = message_id
