@@ -7,7 +7,6 @@ local M = {}
 
 local HEADERS = { "From", "To", "Cc", "Subject" }
 local LABEL_WIDTH = 9
-local MAX_LISTED = 3
 local INVITE_ACTIONS = { { "accept", "accept" }, { "decline", "decline" }, { "tentative", "maybe" } }
 
 local function invite_hint(keymaps)
@@ -46,7 +45,7 @@ function M.lines(message, body, width, invite, config)
     highlights[#highlights + 1] = { #lines, start, start + #config.icons.invite + 1 + #summary, "EmailInvite" }
   end
   local attachments = message.attachments
-  local listed = #attachments <= MAX_LISTED and #attachments or MAX_LISTED - 1
+  local listed = #attachments <= format.MAX_LISTED_ATTACHMENTS and #attachments or format.MAX_LISTED_ATTACHMENTS - 1
   for i = 1, listed do
     local attachment = attachments[i]
     local icon, icon_hl = format.file_icon(attachment.filename, config)

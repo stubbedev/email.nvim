@@ -359,3 +359,46 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
   eq(true, placed[1].cleared and placed[2].cleared and placed[3].cleared)
   eq({}, errors)
 end)
+
+describe("e2e: attached photos are not drawn once the attachment list collapses", function()
+  local parts = {
+    "From: Uploader <up@example.org>",
+    "To: me@example.com",
+    "Subject: Many uploads",
+    "Message-ID: <many@example.org>",
+    "Date: Thu, 19 Nov 2026 10:06:00 +0000",
+    'Content-Type: multipart/mixed; boundary="m"',
+    "",
+    "--m",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    "Uploaded.",
+  }
+  for i = 1, 5 do
+    vim.list_extend(parts, {
+      "--m",
+      "Content-Type: image/jpeg",
+      ('Content-Disposition: attachment; filename="up-%d.jpg"'):format(i),
+      "Content-Transfer-Encoding: base64",
+      "",
+      vim.base64.encode("JPEGDATA"),
+    })
+  end
+  vim.list_extend(parts, { "--m--", "" })
+  write(mail .. "/acct/INBOX/new/1006.x,U=6", table.concat(parts, "\n"))
+  assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
+  vim.cmd("EmailSearch id:many@example.org")
+  wait("upload message", function()
+    return #state.messages == 1 and state.messages[1].id == "many@example.org"
+  end)
+  local before = #placed
+  focus_row(1)
+  keys("<CR>")
+  wait("reader", function()
+    return state.current ~= nil and state.current.id == "many@example.org" and state.busy == 0
+  end)
+  vim.wait(200)
+  eq(before, #placed)
+  eq(5, #state.current.attachments)
+  keys("q")
+end)

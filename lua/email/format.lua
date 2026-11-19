@@ -4,6 +4,8 @@ local M = {}
 
 local DAYS = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
 local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
+M.MAX_LISTED_ATTACHMENTS = 3
+
 local SENDER_WIDTH = 22
 local DATE_WIDTH = 10
 

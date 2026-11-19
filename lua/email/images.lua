@@ -1,4 +1,5 @@
 local async = require("email.async")
+local format = require("email.format")
 local notmuch = require("email.notmuch")
 local state = require("email.state")
 
@@ -43,6 +44,9 @@ local function strip_brackets(id)
 end
 
 function M.append_attachments(message, lines, references)
+  if #message.attachments > format.MAX_LISTED_ATTACHMENTS then
+    return
+  end
   local referenced = {}
   for _, reference in ipairs(references) do
     local cid = reference.source:match("^cid:(.+)$")
