@@ -67,6 +67,10 @@ local function set_hidden(hidden)
   end
 end
 
+function M.reader_width()
+  return geometry().reader.width
+end
+
 function M.is_open()
   return valid(state.win.list)
 end
@@ -144,8 +148,7 @@ function M.open_reader()
   local win = open_window("reader", scratch("email-message"), true, geometry().reader, "Email")
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
-  vim.wo[win].conceallevel = 2
-  vim.wo[win].concealcursor = "nc"
+  vim.wo[win].breakindent = true
   set_hidden(true)
   return state.buf.reader
 end

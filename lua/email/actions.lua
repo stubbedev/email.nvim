@@ -8,6 +8,7 @@ local ical = require("email.ical")
 local layout = require("email.ui.layout")
 local list = require("email.ui.list")
 local maildir = require("email.maildir")
+local markdown = require("email.markdown")
 local notmuch = require("email.notmuch")
 local parse = require("email.parse")
 local reader = require("email.ui.reader")
@@ -42,6 +43,7 @@ M.descriptions = {
   prev_page = "Previous page",
   focus_sidebar = "Focus folders",
   close_reader = "Back to the list",
+  open_link = "Open link under cursor",
   next_message = "Next message",
   prev_message = "Previous message",
   focus_list = "Focus list",
@@ -204,14 +206,16 @@ local function show(summary)
   local pending
   layout.with_busy("Opening", function()
     local message = parse.message(notmuch.show(summary.id), state.config.alternatives)
-    local body = render.body(message, state.config.renderers)
+    local config = state.config
+    local segments = render.segments(message, config.renderers, config.markdown.types)
+    local doc = markdown.render(segments, layout.reader_width(), config.markdown)
     local references = {}
-    if state.config.images.enabled then
-      body, references = images.extract(body)
-      images.append_attachments(message, body, references)
+    if config.images.enabled then
+      images.append_attachments(message, doc, config.markdown.image)
+      references = doc.images
     end
     state.current = message
-    local buf, first_row = reader.show(message, body, invite_of(message))
+    local buf, first_row = reader.show(message, doc, invite_of(message))
     if not vim.b[buf].email_bound then
       M.bind(buf, { "global", "reader" })
       vim.b[buf].email_bound = true
@@ -584,6 +588,19 @@ M.handlers = {
   end,
   close_reader = function()
     layout.close_reader()
+  end,
+  open_link = function()
+    local row, col = unpack(vim.api.nvim_win_get_cursor(state.win.reader))
+    for _, link in ipairs(state.reader_links or {}) do
+      if link.row == row and col >= link.start_col and col < link.end_col then
+        local _, err = vim.ui.open(link.url)
+        if err then
+          error(("open %s: %s"):format(link.url, err), 0)
+        end
+        return
+      end
+    end
+    vim.notify("email.nvim: no link under the cursor")
   end,
   next_message = function()
     step_message(1)

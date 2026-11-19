@@ -28,6 +28,15 @@ M.defaults = {
     marked = "▍",
     invite = "\u{f00ef}",
   },
+  markdown = {
+    types = { "text/html", "text/calendar" },
+    headings = { "\u{f0ca1} ", "\u{f0ca3} ", "\u{f0ca5} ", "\u{f0ca7} ", "\u{f0ca9} ", "\u{f0cab} " },
+    bullets = { "●", "○", "◆", "◇" },
+    quote = "▋",
+    link = "\u{f0339} ",
+    email = "\u{f01ee} ",
+    image = "\u{f0976} ",
+  },
   folder_icons = {
     account = "\u{f01f0}",
     inbox = "\u{f0687}",
@@ -77,6 +86,7 @@ M.defaults = {
       close_reader = "q",
       next_message = "]]",
       prev_message = "[[",
+      open_link = "gx",
     },
     sidebar = {
       select_folder = "<CR>",
@@ -149,6 +159,16 @@ function M.resolve(opts, actions)
   vim.validate("devicons", config.devicons, "boolean")
   vim.validate("icons", config.icons, "table")
   vim.validate("folder_icons", config.folder_icons, "table")
+  vim.validate("markdown", config.markdown, "table")
+  for _, key in ipairs({ "types", "headings", "bullets" }) do
+    vim.validate("markdown." .. key, config.markdown[key], "table")
+    if #config.markdown[key] == 0 then
+      error(("markdown.%s must not be empty"):format(key), 0)
+    end
+  end
+  for _, key in ipairs({ "quote", "link", "email", "image" }) do
+    vim.validate("markdown." .. key, config.markdown[key], "string")
+  end
   if config.devicons then
     require("nvim-web-devicons")
   end

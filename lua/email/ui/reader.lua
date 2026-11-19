@@ -94,25 +94,38 @@ local function footer(message, keymaps)
   return position .. (#hints > 0 and ("· " .. table.concat(hints, " · ") .. " ") or "")
 end
 
-function M.show(message, body, invite)
+function M.show(message, doc, invite)
   local buf = layout.open_reader()
   local width = vim.api.nvim_win_get_width(state.win.reader)
-  local lines, highlights = M.lines(message, body, width, invite, state.config)
+  local lines, highlights = M.lines(message, doc.lines, width, invite, state.config)
+  local first_row = #lines - #doc.lines
   layout.set_lines(buf, lines)
   vim.api.nvim_buf_clear_namespace(buf, highlight.ns, 0, -1)
   for _, hl in ipairs(highlights) do
     highlight.apply(buf, hl[1] - 1, { { hl[2], hl[3], hl[4] } })
   end
-  if not vim.b[buf].email_treesitter then
-    vim.treesitter.start(buf, "markdown")
-    vim.b[buf].email_treesitter = true
+  for _, line in ipairs(doc.line_highlights) do
+    vim.api.nvim_buf_set_extmark(buf, highlight.ns, first_row + line[1] - 1, 0, { line_hl_group = line[2] })
+  end
+  for _, hl in ipairs(doc.highlights) do
+    highlight.apply(buf, first_row + hl[1] - 1, { { hl[2], hl[3], hl[4] } })
+  end
+  state.reader_links = {}
+  for _, link in ipairs(doc.links) do
+    local row = first_row + link.row
+    vim.api.nvim_buf_set_extmark(buf, highlight.ns, row - 1, link.start_col, {
+      end_col = link.end_col,
+      url = link.url,
+    })
+    state.reader_links[#state.reader_links + 1] =
+      { row = row, start_col = link.start_col, end_col = link.end_col, url = link.url }
   end
   vim.api.nvim_win_set_cursor(state.win.reader, { 1, 0 })
   local subject = format.oneline(message.headers.Subject)
   layout.set_title("reader", subject ~= "" and vim.trim(format.fit(subject, width - 4)) or "Email")
   state.reader_footer = footer(message, state.config.keymaps.reader)
   layout.set_footer("reader", state.reader_footer, "center")
-  return buf, #lines - #body
+  return buf, first_row
 end
 
 return M

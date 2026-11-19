@@ -4,7 +4,6 @@ local state = require("email.state")
 
 local M = {}
 
-local REFERENCE = "!%[([^%]]*)%]%(<?([^%s)>]+)>?%)"
 local EXTENSIONS = {
   ["image/png"] = "png",
   ["image/jpeg"] = "jpg",
@@ -18,36 +17,16 @@ local EXTENSIONS = {
 
 local shown = {}
 
-function M.extract(lines)
-  local out, references = {}, {}
-  for _, line in ipairs(lines) do
-    local found = {}
-    local rewritten = line:gsub(REFERENCE, function(alt, source)
-      found[#found + 1] = { alt = alt, source = source }
-      return ("![%s](#image-%d)"):format(alt, #references + #found)
-    end)
-    out[#out + 1] = rewritten
-    for i, reference in ipairs(found) do
-      if i > 1 then
-        out[#out + 1] = ""
-      end
-      reference.row = #out
-      references[#references + 1] = reference
-    end
-  end
-  return out, references
-end
-
 local function strip_brackets(id)
   return (id:gsub("^<(.*)>$", "%1"))
 end
 
-function M.append_attachments(message, lines, references)
+function M.append_attachments(message, doc, icon)
   if #message.attachments > format.MAX_LISTED_ATTACHMENTS then
     return
   end
   local referenced = {}
-  for _, reference in ipairs(references) do
+  for _, reference in ipairs(doc.images) do
     local cid = reference.source:match("^cid:(.+)$")
     if cid then
       referenced[strip_brackets(cid)] = true
@@ -55,9 +34,12 @@ function M.append_attachments(message, lines, references)
   end
   for _, image in ipairs(message.images) do
     if image.attachment and not (image.content_id and referenced[image.content_id]) then
-      lines[#lines + 1] = ""
-      lines[#lines + 1] = ("![%s](#image-%d)"):format(image.filename or "", #references + 1)
-      references[#references + 1] = { alt = image.filename or "", source = "part:" .. image.part, row = #lines }
+      local name = image.filename or "image"
+      doc.lines[#doc.lines + 1] = ""
+      doc.lines[#doc.lines + 1] = icon .. name
+      local row = #doc.lines
+      doc.highlights[#doc.highlights + 1] = { row, 0, #doc.lines[row], "EmailImage" }
+      doc.images[#doc.images + 1] = { alt = name, source = "part:" .. image.part, row = row }
     end
   end
 end

@@ -36,18 +36,31 @@ function M.header_lines(headers)
   return out
 end
 
-function M.body(message, renderers)
+function M.segments(message, renderers, markdown_types)
+  local markdown = {}
+  for _, ctype in ipairs(markdown_types) do
+    markdown[ctype] = true
+  end
   local out = {}
   for _, block in ipairs(message.blocks) do
+    if block.kind == "headers" then
+      local lines = { "---------- Attached message ----------" }
+      vim.list_extend(lines, M.header_lines(block.headers))
+      out[#out + 1] = { lines = lines, markdown = false }
+    else
+      out[#out + 1] = { lines = M.lines(text(block, renderers)), markdown = markdown[block.content_type] == true }
+    end
+  end
+  return out
+end
+
+function M.body(message, renderers)
+  local out = {}
+  for _, segment in ipairs(M.segments(message, renderers, {})) do
     if #out > 0 then
       out[#out + 1] = ""
     end
-    if block.kind == "headers" then
-      out[#out + 1] = "---------- Attached message ----------"
-      vim.list_extend(out, M.header_lines(block.headers))
-    else
-      vim.list_extend(out, M.lines(text(block, renderers)))
-    end
+    vim.list_extend(out, segment.lines)
   end
   return out
 end

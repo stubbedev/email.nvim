@@ -8,8 +8,11 @@ listing, searching and opening mail is instant on a local Maildir kept in sync b
 
 - Folders are notmuch queries with live unread counts.
 - Every MIME type can go through your own **renderer**: an argv that reads the part on stdin, or a Lua function. Use
-  it to turn HTML mail into Markdown, render calendar invites, and so on. The reader shows Markdown with treesitter
-  highlighting and concealed links.
+  it to turn HTML mail into Markdown, render calendar invites, and so on.
+- Markdown output is **rendered**, in the style of render-markdown.nvim: headings with icons and tinted backgrounds,
+  bullets, quote bars, rules, code blocks and box-drawn tables that shrink to the window and wrap inside their cells.
+  Links show only their label; the URL rides on the text as a terminal hyperlink (OSC 8), so you click the label, and
+  wrapping follows what you see. `gx` opens the link under the cursor.
 - Reply, reply all, forward (with attachments) and drafts in a normal buffer. `:w` saves a draft, `<C-s>` sends.
 - Sending pipes the message to any sendmail-compatible command (`msmtp` by default), then files a copy in the
   account's Sent folder with `notmuch insert`.
@@ -88,6 +91,7 @@ The source only answers inside email.nvim's composer, on recipient headers.
 | `accounts` | — | Required, see above |
 | `renderers` | `{}` | MIME type → argv list or `function(content, content_type) -> string`. Parts without a renderer are shown as they are |
 | `alternatives` | `{ "text/html", "text/plain" }` | Preference order inside `multipart/alternative` |
+| `markdown` | `types = { "text/html", "text/calendar" }` and icons | Which content types' rendered output is Markdown (others are shown verbatim), and the `headings`, `bullets`, `quote`, `link`, `email` and `image` icons |
 | `send_cmd` | `{ "msmtp", "--read-envelope-from", "--read-recipients" }` | Reads the message on stdin |
 | `sync_cmd` | `nil` | Run by the sync key |
 | `page_size` | `100` | Messages per page |
@@ -120,7 +124,7 @@ and the rarer actions live under `<leader>m`, so which-key lists them. Press `g?
 | list | `<CR>` `q` `]]` `[[` | open, quit, next and previous page |
 | | `<Tab>` `<C-a>` `<Esc>` | toggle mark (or the visual selection), mark the page, clear marks |
 | | `<C-h>` | focus folders |
-| message | `q` `]]` `[[` | back to the list, next and previous message |
+| message | `q` `]]` `[[` `gx` | back to the list, next and previous message, open the link under the cursor |
 | folders | `<CR>` `q` `<C-l>` | open folder, quit, focus list |
 | composer | `<leader>ms` `<leader>md` `:w` | send, discard, save draft |
 
@@ -128,7 +132,10 @@ and the rarer actions live under `<leader>m`, so which-key lists them. Press `g?
 
 `EmailUnread`, `EmailFlagged`, `EmailReplied`, `EmailAttachment`, `EmailSender`, `EmailSenderUnread`,
 `EmailSubject`, `EmailSubjectUnread`, `EmailDate`, `EmailAccount`, `EmailFolder`, `EmailFolderActive`, `EmailCount`,
-`EmailHeader`, `EmailSeparator`, `EmailMarked`, `EmailMarker`, `EmailFolderIcon`, `EmailAccountIcon`, `EmailInvite`.
+`EmailHeader`, `EmailSeparator`, `EmailMarked`, `EmailMarker`, `EmailFolderIcon`, `EmailAccountIcon`, `EmailInvite`,
+`EmailLink`, `EmailStrong`, `EmailEmph`, `EmailCode`, `EmailCodeBlock`, `EmailImage`, `EmailBullet`, `EmailQuote`,
+`EmailRule`, `EmailTableBorder`, `EmailTableHeader`, `EmailH1`–`EmailH6` and `EmailH1Bg`–`EmailH6Bg` (the backgrounds
+are blended from the heading colours unless you define them).
 
 ## Development
 

@@ -342,12 +342,16 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
     eq(state.buf.reader, placement.buf)
     eq(true, placement.opts.inline)
   end
-  eq({ row_of("#image-1"), row_of("#image-1") + 1, row_of("#image-1") + 2, row_of("#image-4") }, {
-    placed[1].opts.pos[1] - 1,
-    placed[2].opts.pos[1] - 1,
-    placed[3].opts.pos[1] - 1,
-    placed[4].opts.pos[1] - 1,
-  })
+  local image = state.config.markdown.image
+  eq(
+    { row_of(image .. "Logo"), row_of(image .. "Logo") + 1, row_of(image .. "Logo") + 2, row_of(image .. "photo.jpg") },
+    {
+      placed[1].opts.pos[1] - 1,
+      placed[2].opts.pos[1] - 1,
+      placed[3].opts.pos[1] - 1,
+      placed[4].opts.pos[1] - 1,
+    }
+  )
   eq(true, placed[1].src:match("%.png$") ~= nil)
   eq("\137PNG\r\n\26\n", assert(io.open(placed[2].src, "rb")):read("*a"))
   eq("http://127.0.0.1:9/gone.png", placed[3].src)

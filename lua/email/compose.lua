@@ -2,6 +2,7 @@ local async = require("email.async")
 local ical = require("email.ical")
 local layout = require("email.ui.layout")
 local maildir = require("email.maildir")
+local markdown = require("email.markdown")
 local mime = require("email.mime")
 local notmuch = require("email.notmuch")
 local parse = require("email.parse")
@@ -56,6 +57,14 @@ function M.account_of_message(message)
     end
   end
   error(("message %s has no file in any configured account maildir"):format(message.id), 0)
+end
+
+local QUOTE_WIDTH = 72
+
+local function plain_text(message)
+  local config = state.config
+  local segments = render.segments(message, config.renderers, config.markdown.types)
+  return markdown.render(segments, QUOTE_WIDTH, vim.tbl_extend("force", config.markdown, { inline_urls = true })).lines
 end
 
 local function quote(lines)
@@ -127,7 +136,7 @@ function M.reply(id, all)
   local reply = notmuch.reply_headers(id, all)
   local body =
     { "", "", ("On %s, %s wrote:"):format(os.date("%Y-%m-%d %H:%M", message.timestamp), message.headers.From) }
-  vim.list_extend(body, quote(render.body(message, config.renderers)))
+  vim.list_extend(body, quote(plain_text(message)))
   return {
     headers = { From = reply.From, To = reply.To or "", Cc = reply.Cc or "", Subject = reply.Subject or "" },
     hidden = { ["In-Reply-To"] = reply["In-reply-to"], References = reply.References },
@@ -143,7 +152,7 @@ function M.forward(id)
   local body = { "", "", "---------- Forwarded message ----------" }
   vim.list_extend(body, render.header_lines(message.headers))
   body[#body + 1] = ""
-  vim.list_extend(body, render.body(message, config.renderers))
+  vim.list_extend(body, plain_text(message))
   return {
     headers = { From = account.from, To = "", Cc = "", Subject = "Fwd: " .. (message.headers.Subject or "") },
     hidden = {},

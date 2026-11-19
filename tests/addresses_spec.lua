@@ -31,18 +31,3 @@ describe("folder_icon maps common folder names to roles", function()
   eq("A", format.folder_icon("All Mail", icons))
   eq("F", format.folder_icon("Receipts", icons))
 end)
-
-describe("images.extract rewrites references to short anchors and gives each its own row", function()
-  local images = require("email.images")
-  local lines, references = images.extract({
-    "intro",
-    "[![A](cid:a@x)](https://x.com) and ![](data:image/png;base64,AAAA)",
-    "![T](<https://x.com/t.png>)",
-  })
-  eq({ "intro", "[![A](#image-1)](https://x.com) and ![](#image-2)", "", "![T](#image-3)" }, lines)
-  eq({
-    { alt = "A", source = "cid:a@x", row = 2 },
-    { alt = "", source = "data:image/png;base64,AAAA", row = 3 },
-    { alt = "T", source = "https://x.com/t.png", row = 4 },
-  }, references)
-end)
