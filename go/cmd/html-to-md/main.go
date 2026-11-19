@@ -11,12 +11,14 @@ import (
 
 	"github.com/stubbedev/html-to-md/go/internal/calendar"
 	"github.com/stubbedev/html-to-md/go/internal/convert"
+	"github.com/stubbedev/html-to-md/go/internal/markdown"
 	"github.com/stubbedev/html-to-md/go/internal/plain"
 )
 
 const usage = `html-to-md — render email parts as Markdown
 
 usage: html-to-md [--html | --plain | --calendar] [--images]
+       html-to-md --to-html
 
   --html      force the HTML pipeline (vendor-noisy HTML → Markdown)
   --images    keep content images as ![alt](src) (cid: and http(s) sources;
@@ -24,12 +26,14 @@ usage: html-to-md [--html | --plain | --calendar] [--images]
   --plain     dewrap RFC 3676 format=flowed (AERC_FORMAT=flowed); passthrough otherwise
   --calendar  render an iCalendar part (invites, todos)
   (no flag)   auto-detect: BEGIN:VCALENDAR → calendar, HTML markers → html, else plain
+  --to-html   the reverse: render Markdown (an outgoing message body) as an HTML
+              fragment, keeping line breaks; raw HTML in the input is escaped
 `
 
 func main() {
 	var mode convert.Format
 	var opts convert.Options
-	haveMode := false
+	haveMode, toHTML := false, false
 	for _, arg := range os.Args[1:] {
 		switch arg {
 		case "--html":
@@ -40,6 +44,8 @@ func main() {
 			mode, haveMode = convert.Calendar, true
 		case "--images":
 			opts.Images = true
+		case "--to-html":
+			toHTML = true
 		case "-h", "--help":
 			fmt.Print(usage)
 			return
@@ -57,6 +63,23 @@ func main() {
 		os.Exit(1)
 	}
 	input := string(raw)
+
+	if toHTML {
+		if haveMode || opts.Images {
+			fmt.Fprintf(os.Stderr, "html-to-md: --to-html takes no other flags\n\n%s", usage)
+			os.Exit(2)
+		}
+		out, err := markdown.ToHTML(input)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "html-to-md: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := io.WriteString(os.Stdout, out); err != nil {
+			fmt.Fprintf(os.Stderr, "html-to-md: writing stdout: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	out := ""
 	switch {

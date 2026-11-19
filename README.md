@@ -9,6 +9,7 @@ calendar, HTML markers in the first 2 KB → html, else plain):
 | `--html` | `text/html` | vendor-noisy HTML → Markdown (typed-AST pipeline) |
 | `--plain` | `text/plain` | dewrap RFC 3676 `format=flowed`; passthrough otherwise |
 | `--calendar` | `text/calendar` | iCalendar invites/todos → Markdown |
+| `--to-html` | outgoing body | the reverse: Markdown → HTML fragment (GitHub tables, autolinks, strikethrough; line breaks kept; raw HTML escaped) |
 
 `--images` adds content images to the HTML output as `![alt](src)` (a linked
 logo becomes `[![alt](src)](href)`). `cid:`, `http(s)` and base64
