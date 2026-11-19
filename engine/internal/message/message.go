@@ -1,14 +1,12 @@
 package message
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
-	"mime/multipart"
 	"mime/quotedprintable"
 	"net/mail"
 	"net/textproto"
@@ -51,15 +49,7 @@ func Parse(raw []byte) (*Message, error) {
 }
 
 func parseMessage(raw []byte, next *int) (*Message, error) {
-	reader := textproto.NewReader(bufio.NewReader(bytes.NewReader(raw)))
-	header, err := reader.ReadMIMEHeader()
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("reading message header: %w", err)
-	}
-	body, err := io.ReadAll(reader.R)
-	if err != nil {
-		return nil, fmt.Errorf("reading message body: %w", err)
-	}
+	header, body := splitHeader(raw)
 	root, err := parsePart(header, body, next)
 	if err != nil {
 		return nil, err
@@ -81,11 +71,14 @@ func parsePart(header textproto.MIMEHeader, body []byte, next *int) (*Part, erro
 	part.ContentID = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(header.Get("Content-Id")), "<"), ">")
 	switch {
 	case strings.HasPrefix(part.ContentType, "multipart/") && part.Params["boundary"] != "":
-		children, err := parseMultipart(body, part.Params["boundary"], next)
-		if err != nil {
-			return nil, fmt.Errorf("part %d (%s): %w", part.ID, part.ContentType, err)
+		for _, raw := range splitMultipart(body, part.Params["boundary"]) {
+			header, content := splitHeader(raw)
+			child, err := parsePart(header, content, next)
+			if err != nil {
+				return nil, fmt.Errorf("part %d (%s): %w", part.ID, part.ContentType, err)
+			}
+			part.Children = append(part.Children, child)
 		}
-		part.Children = children
 	case part.ContentType == "message/rfc822":
 		decoded, err := decodeTransfer(header.Get("Content-Transfer-Encoding"), body)
 		if err != nil {
@@ -116,29 +109,6 @@ func mediaType(value string) (string, map[string]string) {
 		params = map[string]string{}
 	}
 	return strings.ToLower(media), params
-}
-
-func parseMultipart(body []byte, boundary string, next *int) ([]*Part, error) {
-	reader := multipart.NewReader(bytes.NewReader(body), boundary)
-	var children []*Part
-	for {
-		raw, err := reader.NextRawPart()
-		if errors.Is(err, io.EOF) || (err != nil && len(children) > 0 && errors.Is(err, io.ErrUnexpectedEOF)) {
-			return children, nil
-		}
-		if err != nil {
-			return children, fmt.Errorf("reading multipart: %w", err)
-		}
-		content, err := io.ReadAll(raw)
-		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
-			return children, fmt.Errorf("reading multipart: %w", err)
-		}
-		child, err := parsePart(raw.Header, content, next)
-		if err != nil {
-			return children, err
-		}
-		children = append(children, child)
-	}
 }
 
 func decodeTransfer(encoding string, body []byte) ([]byte, error) {
@@ -223,14 +193,6 @@ func (m *Message) Addresses(names ...string) []*mail.Address {
 		}
 	}
 	return out
-}
-
-func ReadHeader(r io.Reader) (*Message, error) {
-	header, err := textproto.NewReader(bufio.NewReader(r)).ReadMIMEHeader()
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("reading message header: %w", err)
-	}
-	return &Message{Header: header}, nil
 }
 
 func unfold(value string) string {

@@ -110,3 +110,23 @@ func TestParseAddressesDecodesWordsAndKeepsCommasInQuotes(t *testing.T) {
 		t.Errorf("addresses = %+v", got)
 	}
 }
+
+func TestHeaderFieldNamesMayHoldAnyPrintableCharacter(t *testing.T) {
+	m, err := Parse([]byte("From Mailer-Daemon Thu Nov 19 10:00:00 2026\nX-CopenhostA/S-Class: ham\nSubject: folded\n  subject\nbad line\nContent-Type: text/plain\n\nbody\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Header.Get("X-CopenhostA/S-Class") != "ham" || m.Get("Subject") != "folded subject" || m.Root.Text() != "body\n" {
+		t.Errorf("header = %v root %q", m.Header, m.Root.Text())
+	}
+}
+
+func TestMultipartBoundariesTolerateTrailingSpaceAndCRLF(t *testing.T) {
+	m, err := Parse(lf(`Content-Type: multipart/mixed; boundary="b"`, "", "preamble", "--b  ", "Content-Type: text/plain", "", "one", "--b", "", "two", "--b--", "epilogue"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Root.Children) != 2 || m.Root.Children[0].Text() != "one" || m.Root.Children[1].Text() != "two" {
+		t.Errorf("children = %+v", m.Root.Children)
+	}
+}
