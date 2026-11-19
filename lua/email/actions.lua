@@ -212,6 +212,7 @@ local function show(summary)
     local references = {}
     if config.images.enabled then
       images.append_attachments(message, doc, config.markdown.image)
+      images.pad_end(doc)
       references = doc.images
     end
     state.current = message

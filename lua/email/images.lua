@@ -44,6 +44,13 @@ function M.append_attachments(message, doc, icon)
   end
 end
 
+function M.pad_end(doc)
+  local last = doc.images[#doc.images]
+  if last and last.row == #doc.lines then
+    doc.lines[#doc.lines + 1] = ""
+  end
+end
+
 local function part_by_content_id(message, cid)
   cid = strip_brackets(cid)
   for _, image in ipairs(message.images) do

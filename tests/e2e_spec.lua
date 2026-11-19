@@ -357,6 +357,8 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
   eq("http://127.0.0.1:9/gone.png", placed[3].src)
   eq(true, placed[4].src:match("%.jpg$") ~= nil)
   eq(nil, table.concat(lines, "\n"):find("base64", 1, true))
+  eq(placed[4].opts.pos[1] + 1, #lines)
+  eq("", lines[#lines])
   keys("q")
   for _, placement in ipairs(placed) do
     eq(true, placement.closed)
