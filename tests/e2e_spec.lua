@@ -677,3 +677,37 @@ describe(
     eq({}, errors)
   end
 )
+
+describe("e2e: smart folders are saved searches above the accounts, with unread counts", function()
+  require("email.ui.layout").close()
+  state.config.searches = { { name = "Flagged", query = "tag:flagged" } }
+  write(
+    mail .. "/acct/INBOX/new/1010.x,U=10:2,F",
+    "From: Star <s@example.org>\nTo: me@example.com\nSubject: Starred one\nMessage-ID: <star@example.org>\n"
+      .. "Date: Thu, 19 Nov 2026 12:00:00 +0000\n\nkeep\n"
+  )
+  assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
+  assert(vim.system({ "notmuch", "tag", "+flagged", "--", "id:star@example.org" }):wait().code == 0)
+  state.folder = nil
+  vim.cmd("Email")
+  wait("the sidebar", function()
+    return state.busy == 0 and state.unread.smart ~= nil and state.unread.smart[1] ~= nil
+  end)
+  local lines = vim.api.nvim_buf_get_lines(state.buf.sidebar, 0, -1, false)
+  eq(true, lines[1]:find("Smart", 1, true) ~= nil)
+  eq(true, lines[2]:find("Flagged", 1, true) ~= nil)
+  eq(true, lines[2]:find("1 $") ~= nil)
+  eq(true, state.folder.smart)
+  wait("the smart folder's list", function()
+    return state.busy == 0 and #state.threads == 1
+  end)
+  eq("Starred one", state.threads[1].headers.Subject)
+  vim.api.nvim_set_current_win(state.win.list)
+  keys("<S-l>")
+  wait("the next folder", function()
+    return state.busy == 0 and state.folder.smart == nil
+  end)
+  eq(1, state.folder.account)
+  state.config.searches = {}
+  eq({}, errors)
+end)

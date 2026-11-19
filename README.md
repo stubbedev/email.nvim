@@ -95,6 +95,7 @@ The source only answers inside email.nvim's composer, on recipient headers.
 | Option | Default | |
 | --- | --- | --- |
 | `accounts` | — | Required, see above |
+| `searches` | `{}` | Smart folders: saved searches as `{ name, query }`, shown in a "Smart" sidebar section above the accounts, with unread counts, for example `{ name = "Unread", query = "tag:unread and tag:inbox" }` |
 | `renderers` | `{}` | MIME type → argv list or `function(content, content_type) -> string`. Parts without a renderer are shown as they are |
 | `alternatives` | `{ "text/html", "text/plain" }` | Preference order inside `multipart/alternative` |
 | `markdown` | `types = { "text/html", "text/calendar" }` and icons | Which content types' rendered output is Markdown (others are shown verbatim), and the `headings`, `bullets`, `quote`, `link`, `email` and `image` icons |

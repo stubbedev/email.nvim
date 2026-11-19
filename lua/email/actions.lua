@@ -65,19 +65,17 @@ local function query()
 end
 
 function M.refresh_counts()
-  local queries, index = {}, {}
-  for ai, account in ipairs(state.config.accounts) do
-    for fi, folder in ipairs(account.folders) do
-      queries[#queries + 1] = "(" .. folder.query .. ") and tag:unread"
-      index[#queries] = { ai, fi }
-    end
+  local folders = sidebar.folders()
+  local queries = {}
+  for i, folder in ipairs(folders) do
+    queries[i] = "(" .. folder.query .. ") and tag:unread"
   end
   local counts = notmuch.counts(queries)
-  local unread = {}
-  for i, count in ipairs(counts) do
-    local ai, fi = index[i][1], index[i][2]
-    unread[ai] = unread[ai] or {}
-    unread[ai][fi] = count
+  local unread = { smart = {} }
+  for i, folder in ipairs(folders) do
+    local group = folder.smart and "smart" or folder.account
+    unread[group] = unread[group] or {}
+    unread[group][folder.index] = counts[i]
   end
   state.unread = unread
   sidebar.render()
@@ -472,7 +470,7 @@ local function step_folder(delta)
   local folders = sidebar.folders()
   local current = 0
   for i, folder in ipairs(folders) do
-    if state.folder.account == folder.account and state.folder.index == folder.index then
+    if sidebar.same(state.folder, folder) then
       current = i
     end
   end
@@ -694,7 +692,7 @@ M.handlers = {
     local folder = async.select(sidebar.folders(), {
       prompt = "Folder",
       format_item = function(f)
-        return state.config.accounts[f.account].name .. " · " .. f.name
+        return sidebar.label(f)
       end,
     })
     if folder then

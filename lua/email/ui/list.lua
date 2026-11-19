@@ -1,6 +1,7 @@
 local format = require("email.format")
 local highlight = require("email.ui.highlight")
 local layout = require("email.ui.layout")
+local sidebar = require("email.ui.sidebar")
 local state = require("email.state")
 
 local M = {}
@@ -11,11 +12,7 @@ local function title()
   if folder.search then
     return icons.search .. " " .. folder.search
   end
-  return format.folder_icon(folder.name, icons)
-    .. " "
-    .. state.config.accounts[folder.account].name
-    .. " · "
-    .. folder.name
+  return (folder.smart and icons.search or format.folder_icon(folder.name, icons)) .. " " .. sidebar.label(folder)
 end
 
 local function status()

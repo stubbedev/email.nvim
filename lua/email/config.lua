@@ -2,6 +2,7 @@ local M = {}
 
 M.defaults = {
   accounts = {},
+  searches = {},
   renderers = {},
   alternatives = { "text/html", "text/plain" },
   send_cmd = { "msmtp", "--read-envelope-from", "--read-recipients" },
@@ -150,6 +151,11 @@ function M.resolve(opts, actions)
   end
   for i, account in ipairs(config.accounts) do
     validate_account(account, i)
+  end
+  vim.validate("searches", config.searches, "table")
+  for i, search in ipairs(config.searches) do
+    vim.validate(("searches[%d].name"):format(i), search.name, "string")
+    vim.validate(("searches[%d].query"):format(i), search.query, "string")
   end
   vim.validate("renderers", config.renderers, "table")
   for ctype, renderer in pairs(config.renderers) do
