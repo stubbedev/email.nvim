@@ -7,4 +7,6 @@ import "github.com/stubbedev/html-to-md/go/internal/convert"
 
 // Convert renders an HTML email body as Markdown, byte-for-byte what
 // `html-to-md --html` prints.
-func Convert(html string) string { return convert.Convert(html) }
+type Options = convert.Options
+
+func Convert(html string, opts Options) string { return convert.Convert(html, opts) }

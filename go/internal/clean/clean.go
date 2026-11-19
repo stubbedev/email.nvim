@@ -3,8 +3,10 @@
 package clean
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -13,9 +15,13 @@ import (
 	"github.com/stubbedev/html-to-md/go/internal/text"
 )
 
+type Image struct {
+	Alt, Src string
+}
+
 // Doc runs steps 1-3 of the pipeline: strip IE conditionals, parse, run
 // every DOM surgery pass.
-func Doc(input string) *dom.Node {
+func Doc(input string, keepImages bool) (*dom.Node, []Image) {
 	input = StripIEConditionals(input)
 	docp := dom.Parse(input)
 
@@ -28,6 +34,10 @@ func Doc(input string) *dom.Node {
 	// Responsive emails duplicate content: desktop + mobile versions toggled
 	// only with CSS. Since stylesheets are stripped, both would render.
 	DropElements(docp, func(el *dom.Node) bool { return isHidden(el) })
+	var images []Image
+	if keepImages {
+		images = TokeniseImages(docp)
+	}
 	DropElements(docp, func(el *dom.Node) bool {
 		switch el.Tag {
 		case "head", "style", "script", "iframe", "img", "colgroup", "col",
@@ -48,7 +58,50 @@ func Doc(input string) *dom.Node {
 	// Marketing emails wrap a brand logo in <a href="…"><img></a>; once the
 	// <img> is dropped, the anchor has no visible text left.
 	DropEmptyAnchors(docp)
-	return docp
+	return docp, images
+}
+
+func ImageToken(i int) string { return fmt.Sprintf("\uE000%d\uE001", i) }
+
+var ImageTokenRe = regexp.MustCompile(`\x{E000}(\d+)\x{E001}`)
+
+func TokeniseImages(rootp *dom.Node) []Image {
+	var images []Image
+	for _, el := range rootp.Descendants() {
+		if !el.IsTag("img") || !isContentImage(el) {
+			continue
+		}
+		src, _ := el.Attr("src")
+		alt, ok := el.Attr("alt")
+		if !ok || strings.TrimSpace(alt) == "" {
+			alt, _ = el.Attr("title")
+		}
+		el.InsertBefore(dom.NewText(ImageToken(len(images))))
+		el.Detach()
+		images = append(images, Image{Alt: strings.Join(strings.Fields(alt), " "), Src: strings.TrimSpace(src)})
+	}
+	return images
+}
+
+var tinyStyleRe = regexp.MustCompile(`(?:^|;)(?:width|height):0*[0-2](?:px)?(?:;|$)`)
+
+func isContentImage(el *dom.Node) bool {
+	src, _ := el.Attr("src")
+	src = strings.ToLower(strings.TrimSpace(src))
+	if !strings.HasPrefix(src, "cid:") && !strings.HasPrefix(src, "https://") && !strings.HasPrefix(src, "http://") {
+		return false
+	}
+	for _, name := range []string{"width", "height"} {
+		value, ok := el.Attr(name)
+		if !ok {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(value), "px")); err == nil && n <= 2 {
+			return false
+		}
+	}
+	style, _ := el.Attr("style")
+	return !tinyStyleRe.MatchString(strings.ReplaceAll(strings.ToLower(style), " ", ""))
 }
 
 // StripIEConditionals removes non-comment IE conditionals (<![if …]>…

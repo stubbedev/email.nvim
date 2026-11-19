@@ -10,6 +10,13 @@ calendar, HTML markers in the first 2 KB → html, else plain):
 | `--plain` | `text/plain` | dewrap RFC 3676 `format=flowed`; passthrough otherwise |
 | `--calendar` | `text/calendar` | iCalendar invites/todos → Markdown |
 
+`--images` adds content images to the HTML output as `![alt](src)` (a linked
+logo becomes `[![alt](src)](href)`). Only `cid:` and `http(s)` sources are
+kept; tracking pixels and spacers (≤ 2px by attribute or inline style) and
+`data:` URIs are still dropped. During cleaning each kept image is a
+private-use placeholder token, so the emptiness heuristics treat it as
+content, and the token is swapped for the image syntax after rendering.
+
 ## HOW IT WORKS
 
 ```

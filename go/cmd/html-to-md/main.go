@@ -16,9 +16,11 @@ import (
 
 const usage = `html-to-md — render email parts as Markdown
 
-usage: html-to-md [--html | --plain | --calendar]
+usage: html-to-md [--html | --plain | --calendar] [--images]
 
   --html      force the HTML pipeline (vendor-noisy HTML → Markdown)
+  --images    keep content images as ![alt](src) (cid: and http(s) sources;
+              tracking pixels and spacers are still dropped)
   --plain     dewrap RFC 3676 format=flowed (AERC_FORMAT=flowed); passthrough otherwise
   --calendar  render an iCalendar part (invites, todos)
   (no flag)   auto-detect: BEGIN:VCALENDAR → calendar, HTML markers → html, else plain
@@ -26,6 +28,7 @@ usage: html-to-md [--html | --plain | --calendar]
 
 func main() {
 	var mode convert.Format
+	var opts convert.Options
 	haveMode := false
 	for _, arg := range os.Args[1:] {
 		switch arg {
@@ -35,6 +38,8 @@ func main() {
 			mode, haveMode = convert.Plain, true
 		case "--calendar":
 			mode, haveMode = convert.Calendar, true
+		case "--images":
+			opts.Images = true
 		case "-h", "--help":
 			fmt.Print(usage)
 			return
@@ -60,7 +65,7 @@ func main() {
 	}
 	switch mode {
 	case convert.Html:
-		out = convert.Convert(input)
+		out = convert.Convert(input, opts)
 	case convert.Plain:
 		// aerc passes the part's content-type format= parameter here.
 		flowed := strings.EqualFold(os.Getenv("AERC_FORMAT"), "flowed")

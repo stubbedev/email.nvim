@@ -271,6 +271,13 @@ func isWs(c rune) bool {
 
 // escapeMarkdown backslash-escapes the structural characters. Whitespace
 // collapsing and unicode-escape decoding happened at lowering.
+func Image(alt, src string) string {
+	if strings.ContainsAny(src, " ()") {
+		src = "<" + src + ">"
+	}
+	return "![" + escapeMarkdown(alt) + "](" + src + ")"
+}
+
 func escapeMarkdown(s string) string {
 	var b strings.Builder
 	b.Grow(len(s) + 4)

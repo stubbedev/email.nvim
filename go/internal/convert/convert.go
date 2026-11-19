@@ -3,6 +3,7 @@
 package convert
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/stubbedev/html-to-md/go/internal/ast"
@@ -48,14 +49,25 @@ func Detect(input string) Format {
 
 // Convert renders an HTML email body as Markdown. Paragraphs are emitted
 // unwrapped; the pager owns soft-wrapping.
-func Convert(html string) string {
-	docp := clean.Doc(html)
+type Options struct {
+	Images bool
+}
+
+func Convert(html string, opts Options) string {
+	docp, images := clean.Doc(html, opts.Images)
 	shift := max(lower.MinHeadingLevel(docp)-1, 0)
 	blocks := lower.Document(docp, shift)
 	blocks = astDropEmpty(blocks)
 	blocks = astCompress(blocks)
 	blocks = astJoinLinks(blocks)
-	return strings.TrimLeft(render.Document(blocks), "\n")
+	out := strings.TrimLeft(render.Document(blocks), "\n")
+	if len(images) == 0 {
+		return out
+	}
+	return clean.ImageTokenRe.ReplaceAllStringFunc(out, func(token string) string {
+		i, _ := strconv.Atoi(clean.ImageTokenRe.FindStringSubmatch(token)[1])
+		return render.Image(images[i].Alt, images[i].Src)
+	})
 }
 
 func astDropEmpty(bs []ast.Block) []ast.Block { return ast.DropEmptySections(bs) }

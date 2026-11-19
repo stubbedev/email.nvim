@@ -60,10 +60,33 @@ var golden = []struct {
 	{"heading_normalised", "<h2><strong>Normal</strong>  Sauna  <em>Hours</em></h2><p>body</p>", "# Normal Sauna Hours\n\nbody"},
 }
 
+var goldenImages = []struct {
+	name, input, want string
+}{
+	{"image_cid", "<p>Hello</p><img src=\"cid:logo@x\" alt=\"Logo\">", "Hello\n\n![Logo](cid:logo@x)"},
+	{"image_linked_logo", "<a href=\"https://x.com/\"><img src=\"https://x.com/logo.png\" alt=\"X\"></a><p>body</p>", "[![X](https://x.com/logo.png)](https://x.com/)\n\nbody"},
+	{"image_tracking_pixel", "<p>body</p><img src=\"https://t.x.com/o.gif\" width=\"1\" height=\"1\">", "body"},
+	{"image_spacer_style", "<p>body</p><img src=\"https://x.com/s.gif\" style=\"width: 1px; height: 1px\">", "body"},
+	{"image_data_uri", "<p>body</p><img src=\"data:image/png;base64,AAAA\">", "body"},
+	{"image_alt_escaped", "<p><img src=\"cid:a\" alt=\"a [b] c\"></p>", "![a \\[b\\] c](cid:a)"},
+	{"image_src_with_space", "<p><img src=\"https://x.com/a b.png\" title=\"T\"></p>", "![T](<https://x.com/a b.png>)"},
+}
+
+func TestGoldenImages(t *testing.T) {
+	for _, tt := range goldenImages {
+		t.Run(tt.name, func(t *testing.T) {
+			got := convert.Convert(tt.input, convert.Options{Images: true})
+			if got != tt.want {
+				t.Errorf("\nexpected:\n%s\nactual:\n%s", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestGolden(t *testing.T) {
 	for _, tt := range golden {
 		t.Run(tt.name, func(t *testing.T) {
-			got := convert.Convert(tt.input)
+			got := convert.Convert(tt.input, convert.Options{})
 			if got != tt.want {
 				t.Errorf("\nexpected:\n%s\nactual:\n%s", tt.want, got)
 			}

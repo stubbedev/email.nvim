@@ -12,7 +12,7 @@ import (
 // output stays in dialect. Plain descriptions keep the tight-lines path.
 func renderDescription(raw string) []string {
 	if looksLikeHTML(raw) {
-		if converted := conv.Convert(raw); strings.TrimSpace(converted) != "" {
+		if converted := conv.Convert(raw, conv.Options{}); strings.TrimSpace(converted) != "" {
 			return []string{converted}
 		}
 	}
