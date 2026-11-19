@@ -1,6 +1,5 @@
 local addresses = require("email.addresses")
 local async = require("email.async")
-local mime = require("email.mime")
 
 local source = {}
 
@@ -25,7 +24,7 @@ function source:get_completions(ctx, callback)
     local kind = require("blink.cmp.types").CompletionItemKind.Text
     local items = {}
     for i, entry in ipairs(addresses.load()) do
-      local text = mime.display_address(entry)
+      local text = entry.display
       items[i] = {
         label = text,
         kind = kind,

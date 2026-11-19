@@ -3,8 +3,8 @@ local async = require("email.async")
 local compose = require("email.compose")
 local config = require("email.config")
 local highlight = require("email.ui.highlight")
+local engine = require("email.engine")
 local layout = require("email.ui.layout")
-local notmuch = require("email.notmuch")
 local sidebar = require("email.ui.sidebar")
 local state = require("email.state")
 
@@ -32,7 +32,7 @@ function M.open(search, open_first)
   end
   async.run(function()
     actions.reload()
-    state.lastmod = notmuch.lastmod()
+    state.lastmod = engine.revision()
     actions.start_polling()
     if open_first then
       if #state.threads == 0 then
@@ -52,6 +52,7 @@ end
 
 function M.setup(opts)
   state.config = config.resolve(opts, actions.contexts)
+  engine.stop()
   highlight.setup()
   vim.api.nvim_create_user_command("Email", function()
     M.open()

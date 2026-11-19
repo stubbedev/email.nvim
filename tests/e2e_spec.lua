@@ -94,7 +94,7 @@ vim.notify = function(msg, level)
 end
 vim.o.columns, vim.o.lines = 160, 50
 
-local sent_path = root .. "/sent.eml"
+local smtp = dofile(vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h") .. "/smtp.lua").start()
 require("email").setup({
   accounts = {
     {
@@ -107,6 +107,7 @@ require("email").setup({
       drafts = "Drafts",
       archive = "Archive",
       folders = { { name = "INBOX", query = "tag:inbox" } },
+      smtp = { host = "127.0.0.1", port = smtp.port, security = "none" },
     },
   },
   renderers = {
@@ -115,7 +116,6 @@ require("email").setup({
     end,
   },
   images = { enabled = true, remote = true },
-  send_cmd = { "sh", "-c", 'cat > "$0"', sent_path },
   refresh_interval = 0,
 })
 
@@ -132,10 +132,7 @@ local function files(folder)
   return vim.fn.glob(("%s/acct/%s/*/*"):format(mail, folder), false, true)
 end
 local function read_sent()
-  local fd = assert(io.open(sent_path))
-  local sent = fd:read("*a")
-  fd:close()
-  return sent
+  return assert(smtp.last(), "nothing was sent")
 end
 local function subjects()
   local out = {}
@@ -202,10 +199,8 @@ describe("e2e: accepting sends an iCalendar REPLY to the organizer", function()
   end)
   local sent = read_sent()
   eq(true, sent:find("Content-Type: text/calendar; charset=utf-8; method=REPLY", 1, true) ~= nil)
-  local encoded = sent:match("method=REPLY\nContent%-Transfer%-Encoding: base64\n\n(.-)\n%-%-")
-  local ics = vim.base64.decode((encoded:gsub("\n", "")))
-  eq(true, ics:find("METHOD:REPLY", 1, true) ~= nil)
-  eq(true, ics:find("ATTENDEE;CN=Test User;PARTSTAT=ACCEPTED:mailto:me@example.com", 1, true) ~= nil)
+  eq(true, sent:find("METHOD:REPLY", 1, true) ~= nil)
+  eq(true, sent:find("ATTENDEE;CN=Test User;PARTSTAT=ACCEPTED:mailto:me@example.com", 1, true) ~= nil)
   keys("q")
 end)
 
@@ -555,6 +550,7 @@ end)
 describe("e2e: delete moves to the trash, undo brings it back, and deleting from the trash is permanent", function()
   require("email.ui.layout").close()
   state.config.accounts[1].trash = "Trash"
+  require("email.async").run(require("email.engine").reconfigure)
   write(
     mail .. "/acct/INBOX/new/1007.x,U=7",
     "From: Sender <s@example.org>\nTo: me@example.com\nSubject: Trash me\nMessage-ID: <trash@example.org>\n"
@@ -606,6 +602,7 @@ describe("e2e: delete moves to the trash, undo brings it back, and deleting from
   eq("", vim.trim(vim.system({ "notmuch", "search", "id:trash@example.org" }):wait().stdout))
   vim.fn.confirm = confirm
   state.config.accounts[1].trash = nil
+  require("email.async").run(require("email.engine").reconfigure)
   eq({}, errors)
 end)
 
@@ -720,7 +717,6 @@ describe("e2e: signatures, the attach picker, an HTML alternative and undo send"
   require("email.ui.layout").close()
   local account = state.config.accounts[1]
   account.signature = "Test User\nexample.com"
-  state.config.html_cmd = { "sh", "-c", "printf '<p>'; cat; printf '</p>'" }
   state.config.send_delay = 1
   local attachment = root .. "/notes.txt"
   write(attachment, "notes")
@@ -745,7 +741,7 @@ describe("e2e: signatures, the attach picker, an HTML alternative and undo send"
   keys("<leader>ma")
   eq("Attach: " .. attachment, vim.api.nvim_buf_get_lines(buf, 4, 5, false)[1])
 
-  os.remove(sent_path)
+  local sent_before = #smtp.messages
   keys("<leader>ms")
   wait("the composer to hide", function()
     return state.pending_send ~= nil
@@ -756,22 +752,21 @@ describe("e2e: signatures, the attach picker, an HTML alternative and undo send"
     return state.pending_send == nil and vim.api.nvim_get_current_buf() == buf
   end)
   vim.wait(1500)
-  eq(nil, io.open(sent_path))
+  eq(sent_before, #smtp.messages)
 
   keys("<leader>ms")
   wait("the delayed send", function()
-    return not vim.api.nvim_buf_is_valid(buf) and io.open(sent_path) ~= nil and state.busy == 0
+    return not vim.api.nvim_buf_is_valid(buf) and #smtp.messages > sent_before and state.busy == 0
   end)
   local sent = read_sent()
   eq(true, sent:find("Content-Type: multipart/mixed", 1, true) ~= nil)
   eq(true, sent:find("Content-Type: multipart/alternative", 1, true) ~= nil)
-  local html = sent:match("Content%-Type: text/html; charset=utf%-8\nContent%-Transfer%-Encoding: base64\n\n(.-)\n%-%-")
-  eq(true, vim.base64.decode((html:gsub("\n", ""))):find("<p>**hello**", 1, true) ~= nil)
-  eq(true, sent:find('filename="notes.txt"', 1, true) ~= nil)
+  eq(true, sent:find("Content-Type: text/html; charset=utf-8", 1, true) ~= nil)
+  eq(true, sent:find("<p><strong>hello</strong></p>", 1, true) ~= nil)
+  eq(true, sent:find("filename=notes.txt", 1, true) ~= nil)
   eq(true, sent:find("Test User", 1, true) ~= nil)
 
   account.signature = nil
-  state.config.html_cmd = nil
   state.config.send_delay = 0
   state.config.attach_picker = nil
   eq({}, errors)

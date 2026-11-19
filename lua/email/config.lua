@@ -5,9 +5,9 @@ M.defaults = {
   searches = {},
   renderers = {},
   alternatives = { "text/html", "text/plain" },
-  send_cmd = { "msmtp", "--read-envelope-from", "--read-recipients" },
+  engine = nil,
   send_delay = 0,
-  html_cmd = nil,
+  html_alternative = true,
   attach_picker = nil,
   sync_cmd = nil,
   page_size = 100,
@@ -117,6 +117,7 @@ local function validate_account(account, i)
   vim.validate(where .. ".archive", account.archive, "string", true)
   vim.validate(where .. ".trash", account.trash, "string", true)
   vim.validate(where .. ".signature", account.signature, "string", true)
+  vim.validate(where .. ".smtp", account.smtp, "table", true)
   vim.validate(where .. ".addresses", account.addresses, "table")
   vim.validate(where .. ".folders", account.folders, "table")
   if #account.addresses == 0 then
@@ -168,9 +169,9 @@ function M.resolve(opts, actions)
       error(("renderers[%q] must be an argv list or a function"):format(ctype), 0)
     end
   end
-  vim.validate("send_cmd", config.send_cmd, "table")
+  vim.validate("engine", config.engine, "string", true)
   vim.validate("send_delay", config.send_delay, "number")
-  vim.validate("html_cmd", config.html_cmd, "table", true)
+  vim.validate("html_alternative", config.html_alternative, "boolean")
   vim.validate("attach_picker", config.attach_picker, "function", true)
   vim.validate("sync_cmd", config.sync_cmd, "table", true)
   vim.validate("page_size", config.page_size, "number")

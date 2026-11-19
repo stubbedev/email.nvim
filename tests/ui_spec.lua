@@ -46,7 +46,8 @@ describe("row lays out status, sender, subject and a right-aligned date in the w
     id = "1",
     timestamp = os.time({ year = 2026, month = 11, day = 19, hour = 9, min = 5 }),
     tags = { unread = true, attachment = true },
-    headers = { From = '"Jane Doe" <jane@x.y>', Subject = "Hello\tthere" },
+    sender = "Jane Doe",
+    headers = { Subject = "Hello\tthere" },
   }, 80, icons, now)
   eq(80, vim.fn.strdisplaywidth(line))
   eq(true, line:find("● @ Jane Doe", 1, true) ~= nil)

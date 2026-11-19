@@ -1,5 +1,5 @@
+local engine = require("email.engine")
 local format = require("email.format")
-local notmuch = require("email.notmuch")
 local state = require("email.state")
 
 local M = {}
@@ -70,12 +70,12 @@ local function part_by_id(message, id)
   return nil
 end
 
-local function write(dir, index, content_type, data)
+local function image_path(dir, index, content_type)
   local extension = EXTENSIONS[content_type:lower()]
-  if not extension then
-    return nil
-  end
-  local path = ("%s/image-%d.%s"):format(dir, index, extension)
+  return extension and ("%s/image-%d.%s"):format(dir, index, extension)
+end
+
+local function write(path, data)
   local fd, err = io.open(path, "wb")
   if not fd then
     error(("write image %s: %s"):format(path, err), 0)
@@ -91,7 +91,11 @@ function M.resolve(message, reference, dir, index)
   local part = cid and part_by_content_id(message, cid)
     or source:match("^part:(%d+)$") and part_by_id(message, tonumber(source:match("^part:(%d+)$")))
   if part then
-    return write(dir, index, part.content_type, notmuch.part(message.id, part.part))
+    local path = image_path(dir, index, part.content_type)
+    if path then
+      engine.extract(message.id, part.part, path)
+    end
+    return path
   end
   local content_type, payload = source:match("^data:([^;,]+);base64,(.+)$")
   if content_type then
@@ -100,7 +104,8 @@ function M.resolve(message, reference, dir, index)
       vim.notify(("email.nvim: image %d has an invalid data: URI (%s)"):format(index, data), vim.log.levels.WARN)
       return nil
     end
-    return write(dir, index, content_type, data)
+    local path = image_path(dir, index, content_type)
+    return path and write(path, data)
   end
   return nil
 end

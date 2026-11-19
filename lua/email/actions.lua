@@ -1,16 +1,13 @@
 local async = require("email.async")
 local compose = require("email.compose")
 local composer = require("email.ui.composer")
+local engine = require("email.engine")
 local format = require("email.format")
 local help = require("email.ui.help")
 local images = require("email.images")
-local ical = require("email.ical")
 local layout = require("email.ui.layout")
 local list = require("email.ui.list")
-local maildir = require("email.maildir")
 local markdown = require("email.markdown")
-local notmuch = require("email.notmuch")
-local parse = require("email.parse")
 local reader = require("email.ui.reader")
 local render = require("email.render")
 local sidebar = require("email.ui.sidebar")
@@ -71,7 +68,7 @@ function M.refresh_counts()
   for i, folder in ipairs(folders) do
     queries[i] = "(" .. folder.query .. ") and tag:unread"
   end
-  local counts = notmuch.counts(queries)
+  local counts = engine.counts(queries)
   local unread = { smart = {} }
   for i, folder in ipairs(folders) do
     local group = folder.smart and "smart" or folder.account
@@ -85,14 +82,12 @@ end
 function M.load_list(keep_id)
   state.load_generation = state.load_generation + 1
   local generation = state.load_generation
-  local q = query()
-  local total = notmuch.count_threads(q)
-  local raws = notmuch.threads(q, math.max(state.config.page_size, #state.threads), 0)
+  local threads, total = engine.threads(query(), 0, math.max(state.config.page_size, #state.threads), true)
   if generation ~= state.load_generation or not layout.is_open() then
     return
   end
   state.total = total
-  state.threads = vim.tbl_map(parse.thread, raws)
+  state.threads = threads
   list.render(keep_id)
 end
 
@@ -105,7 +100,7 @@ function M.load_more()
   state.loading_more = true
   local generation = state.load_generation
   local ok, err = pcall(function()
-    local raws = notmuch.threads(query(), state.config.page_size, #state.threads)
+    local threads = engine.threads(query(), #state.threads, state.config.page_size, false)
     if generation ~= state.load_generation or not layout.is_open() then
       return
     end
@@ -113,9 +108,9 @@ function M.load_more()
     for _, thread in ipairs(state.threads) do
       known[thread.id] = true
     end
-    for _, raw in ipairs(raws) do
-      if not known[raw.thread] then
-        state.threads[#state.threads + 1] = parse.thread(raw)
+    for _, thread in ipairs(threads) do
+      if not known[thread.id] then
+        state.threads[#state.threads + 1] = thread
       end
     end
     list.render()
@@ -150,7 +145,7 @@ local function target()
     return state.current
   end
   local thread = list.selected() or error("no conversation selected", 0)
-  return parse.message(notmuch.show(notmuch.newest_message(thread.id, query())), state.config.alternatives)
+  return engine.message(engine.newest_message(thread.id, query()))
 end
 
 local function in_visual()
@@ -187,41 +182,32 @@ local function selected_threads()
   return { list.selected() or error("no conversation selected", 0) }
 end
 
-local function ids_of(messages)
-  local ids = {}
-  for i, message in ipairs(messages) do
-    ids[i] = message.id
-  end
-  return ids
+local function preferred()
+  return state.folder.account or 0
 end
 
 local function selection()
   if reading() then
-    return { state.current }, {}, ("%q"):format(format.oneline(state.current.headers.Subject))
+    return { state.current.id }, {}, ("%q"):format(format.oneline(state.current.headers.Subject))
   end
   local threads = selected_threads()
   local ids = {}
   for _, thread in ipairs(threads) do
     vim.list_extend(ids, thread.message_ids)
   end
-  local files = notmuch.files_by_id(ids)
-  local messages = {}
-  for i, id in ipairs(ids) do
-    messages[i] = { id = id, files = files[id] }
-  end
   local label = #threads == 1 and ("%q"):format(format.oneline(threads[1].headers.Subject))
     or ("%d conversations"):format(#threads)
-  return messages, threads, label
+  return ids, threads, label
 end
 
 local function toggle_tag(tag)
-  local messages, threads = selection()
+  local ids, threads = selection()
   local any = reading() and state.current.tags[tag] == true
   for _, thread in ipairs(threads) do
     any = any or thread.tags[tag] == true
   end
   local change = (any and "-" or "+") .. tag
-  notmuch.tag(ids_of(messages), { change })
+  engine.tag(ids, { change })
   if reading() then
     state.current.tags[tag] = not any or nil
   end
@@ -231,11 +217,8 @@ local function toggle_tag(tag)
 end
 
 local function invite_of(message)
-  if #message.calendars == 0 then
-    return nil
-  end
-  local calendar = ical.parse(compose.invite_text(message.id, message))
-  return { summary = ical.summary(calendar), method = calendar.method }
+  local calendar = message.calendars[1]
+  return calendar and { summary = calendar.summary, method = calendar.method }
 end
 
 local function render_message(message)
@@ -250,45 +233,44 @@ local function render_message(message)
 end
 
 local function show(thread)
-  local pending = {}
+  local entries, unread, buf = {}, {}, nil
   layout.with_busy("Opening", function()
-    local entries, unread = {}, {}
-    for _, raw in ipairs(notmuch.thread(thread.id)) do
-      local message = parse.message(raw, state.config.alternatives)
+    for _, message in ipairs(engine.thread(thread.id)) do
       entries[#entries + 1] = { message = message, doc = render_message(message), invite = invite_of(message) }
       if message.tags.unread then
         unread[#unread + 1] = message.id
       end
     end
     state.thread = thread.id
-    local buf, focus = reader.show(thread.id, entries)
+    local focus
+    buf, focus = reader.show(thread.id, entries)
     state.current = focus
     if not vim.b[buf].email_bound then
       M.bind(buf, { "global", "reader" })
       vim.b[buf].email_bound = true
     end
-    if #unread > 0 then
-      notmuch.tag(unread, { "-unread" })
-      for _, entry in ipairs(entries) do
-        entry.message.tags.unread = nil
-      end
-      thread.tags.unread = nil
-      list.render()
-      M.refresh_counts()
-    end
-    if state.config.images.enabled then
-      for index, entry in ipairs(entries) do
-        if #entry.doc.images > 0 then
-          pending[#pending + 1] =
-            { message = entry.message, references = entry.doc.images, first_row = state.sections[index].body }
-        end
-      end
-    end
-    pending.buf = buf
   end)
   layout.focus("reader")
-  if #pending > 0 then
-    images.show(pending, pending.buf)
+  local pending = {}
+  if state.config.images.enabled then
+    for index, entry in ipairs(entries) do
+      if #entry.doc.images > 0 then
+        pending[#pending + 1] =
+          { message = entry.message, references = entry.doc.images, first_row = state.sections[index].body }
+      end
+    end
+  end
+  if #unread > 0 then
+    engine.tag(unread, { "-unread" })
+    for _, entry in ipairs(entries) do
+      entry.message.tags.unread = nil
+    end
+    thread.tags.unread = nil
+    list.render()
+    M.refresh_counts()
+  end
+  if #pending > 0 and state.thread == thread.id then
+    images.show(pending, buf)
   end
 end
 
@@ -332,75 +314,23 @@ local function sync_soon()
   end
 end
 
-local function retag_inbox(into, out_of)
-  if #into > 0 then
-    notmuch.tag(into, { "+inbox" })
-  end
-  if #out_of > 0 then
-    notmuch.tag(out_of, { "-inbox" })
-  end
-end
-
-local function relocate(messages, threads, destination, label)
-  local ids = ids_of(messages)
+local function relocate(ids, threads, action, folder, label)
   local affected = {}
   for _, thread in ipairs(threads) do
     affected[thread.id] = true
   end
   local keep = neighbour(affected)
-  local stash = vim.fn.tempname()
-  vim.fn.mkdir(stash, "p")
-  local undo = { label = label, journal = {}, into_inbox = {}, out_of_inbox = {} }
+  local undo
   layout.with_busy(label, function()
-    local files = notmuch.files_by_id(ids)
-    local into_inbox, out_of_inbox = {}, {}
-    local ok, err = pcall(function()
-      for _, message in ipairs(messages) do
-        local account = compose.account_of_message(message)
-        local root = compose.root(account)
-        local own = files[message.id]
-        local was_in_inbox = vim.iter(own):any(function(file)
-          return maildir.split(file, root) == account.inbox
-        end)
-        local folder = destination(account, own, root)
-        if folder then
-          maildir.move(own, root, folder, stash, undo.journal)
-          table.insert(folder == account.inbox and into_inbox or out_of_inbox, message.id)
-        else
-          maildir.unlink(own, root, stash, undo.journal)
-        end
-        table.insert(was_in_inbox and undo.into_inbox or undo.out_of_inbox, message.id)
-      end
-    end)
-    notmuch.reindex()
-    retag_inbox(into_inbox, out_of_inbox)
-    if not ok then
-      error(err, 0)
-    end
+    undo = engine.relocate(ids, action, folder, vim.fn.tempname(), preferred())
   end)
-  state.undo = undo
+  state.undo = { label = label, data = undo }
   state.marked = {}
   if state.reading then
     layout.close_reader()
   end
   M.reload(keep)
   sync_soon()
-end
-
-local function in_trash(account, own, root)
-  return account.trash ~= nil and maildir.in_folder(own, root, account.trash)
-end
-
-local function single_account(messages)
-  local account
-  for _, message in ipairs(messages) do
-    local owner = compose.account_of_message(message)
-    if account and owner ~= account then
-      error("the selected messages belong to different accounts", 0)
-    end
-    account = owner
-  end
-  return account
 end
 
 local function link_at(row, col)
@@ -419,8 +349,19 @@ local function open_url(url)
   end
 end
 
+local function read_file(path)
+  local fd, err = io.open(path, "rb")
+  if not fd then
+    error(("read %s: %s"):format(path, err), 0)
+  end
+  local data = fd:read("*a")
+  fd:close()
+  return data
+end
+
 local function pipe_to(message, cmd)
-  local res = async.system(cmd, { stdin = notmuch.raw(message.id), text = true })
+  local file = message.files[1] or error(("message %s has no file"):format(message.id), 0)
+  local res = async.system(cmd, { stdin = read_file(file), text = true })
   local output = vim.trim((res.stdout or "") .. (res.stderr or ""))
   vim.notify(
     output ~= "" and output or ("`%s` exited %d"):format(table.concat(cmd, " "), res.code),
@@ -456,20 +397,6 @@ local function unique_path(dir, filename)
     n = n + 1
   end
   return path
-end
-
-local function write_atomic(path, data)
-  local tmp = path .. ".part"
-  local fd, err = io.open(tmp, "wb")
-  if not fd then
-    error(("write %s: %s"):format(tmp, err), 0)
-  end
-  fd:write(data)
-  fd:close()
-  local ok, rename_err = vim.uv.fs_rename(tmp, path)
-  if not ok then
-    error(("rename %s to %s: %s"):format(tmp, path, rename_err), 0)
-  end
 end
 
 local function step_folder(delta)
@@ -534,30 +461,18 @@ M.handlers = {
     prepare(compose.edit, target().id)
   end,
   archive = function()
-    local messages, threads = selection()
-    relocate(messages, threads, function(account)
-      return account.archive or error(("account %s has no archive folder"):format(account.name), 0)
-    end, "Archiving")
+    local ids, threads = selection()
+    relocate(ids, threads, "archive", nil, "Archiving")
   end,
   delete = function()
-    local messages, threads, label = selection()
-    local files = notmuch.files_by_id(ids_of(messages))
-    local permanent = vim.iter(messages):any(function(message)
-      local account = compose.account_of_message(message)
-      return account.trash == nil or in_trash(account, files[message.id], compose.root(account))
-    end)
-    if permanent then
+    local ids, threads, label = selection()
+    if engine.permanent_delete(ids, preferred()) then
       local question = ("Permanently delete %s?"):format(label)
       if vim.fn.confirm(question, "&Delete\n&Cancel", 2) ~= 1 then
         return
       end
     end
-    relocate(messages, threads, function(account, own, root)
-      if in_trash(account, own, root) then
-        return nil
-      end
-      return account.trash
-    end, "Deleting")
+    relocate(ids, threads, "delete", nil, "Deleting")
   end,
   undo = function()
     if compose.cancel_send() then
@@ -566,22 +481,17 @@ M.handlers = {
     local undo = state.undo or error("nothing to undo", 0)
     state.undo = nil
     layout.with_busy("Undoing", function()
-      maildir.undo(undo.journal)
-      notmuch.reindex()
-      retag_inbox(undo.into_inbox, undo.out_of_inbox)
+      engine.undo(undo.data)
     end)
     M.reload()
     sync_soon()
     vim.notify(("email.nvim: undid %s"):format(undo.label:lower()))
   end,
   move = function()
-    local messages, threads, label = selection()
-    local account = single_account(messages)
-    local folder = async.select(maildir.folders(compose.root(account)), { prompt = "Move " .. label .. " to" })
+    local ids, threads, label = selection()
+    local folder = async.select(engine.folders(ids, preferred()), { prompt = "Move " .. label .. " to" })
     if folder then
-      relocate(messages, threads, function()
-        return folder
-      end, "Moving")
+      relocate(ids, threads, "move", folder, "Moving")
     end
   end,
   toggle_unread = function()
@@ -652,19 +562,18 @@ M.handlers = {
     if not choice then
       return
     end
-    local data = notmuch.part(message.id, attachment.part)
     local filename = attachment.filename:gsub("/", "_")
     if choice == "Save" then
       vim.fn.mkdir(state.config.downloads_dir, "p")
       local path = unique_path(state.config.downloads_dir, filename)
-      write_atomic(path, data)
+      engine.extract(message.id, attachment.part, path)
       vim.notify("email.nvim: saved " .. path)
       return
     end
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir, "p")
     local path = dir .. "/" .. filename
-    write_atomic(path, data)
+    engine.extract(message.id, attachment.part, path)
     local _, err = vim.ui.open(path)
     if err then
       error(("open %s: %s"):format(path, err), 0)
@@ -842,7 +751,7 @@ function M.start_polling()
       state.polling = true
       async.run(function()
         local ok, err = pcall(function()
-          local lastmod = notmuch.lastmod()
+          local lastmod = engine.revision()
           if lastmod ~= state.lastmod then
             state.lastmod = lastmod
             M.refresh_counts()

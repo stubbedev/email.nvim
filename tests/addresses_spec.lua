@@ -9,14 +9,6 @@ describe("token_start finds the address being typed on recipient headers only", 
   eq(nil, addresses.token_start("To: jo", 1))
 end)
 
-describe("rank merges by address, weights people we wrote to, and keeps the first name", function()
-  local ranked = addresses.rank(
-    { { address = "Ann@x.y", name = "", count = 1 } },
-    { { address = "ann@x.y", name = "Ann A", count = 2 }, { address = "news@x.y", name = "News", count = 9 } }
-  )
-  eq({ { addr = "Ann@x.y", name = "Ann A", score = 12 }, { addr = "news@x.y", name = "News", score = 9 } }, ranked)
-end)
-
 describe("matches filters on name or address, case-insensitively, in rank order", function()
   local entries = { { addr = "ann@x.y", name = "Ann" }, { addr = "bob@x.y", name = "Bob Annson" }, { addr = "c@x.y" } }
   eq({ entries[1], entries[2] }, addresses.matches(entries, "ANN", 10))

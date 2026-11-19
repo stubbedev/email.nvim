@@ -1,5 +1,3 @@
-local mime = require("email.mime")
-
 local M = {}
 
 local DAYS = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
@@ -44,14 +42,6 @@ function M.fit(s, width)
   return table.concat(out) .. "…" .. string.rep(" ", width - 1 - used)
 end
 
-function M.sender(from)
-  local first = mime.parse_addresses(from or "")[1]
-  if not first then
-    return "(unknown)"
-  end
-  return first.name or first.addr
-end
-
 function M.status_icon(tags, icons)
   if tags.flagged then
     return icons.flagged, "EmailFlagged"
@@ -81,7 +71,7 @@ function M.row(message, width, icons, now, marked)
   segments[#segments + 1] = { marked and M.fit(icons.marked, 1) or " ", marked and "EmailMarker" or nil }
   segments[#segments + 1] = { M.fit(status, iw) .. " ", status_hl }
   segments[#segments + 1] = { M.fit(message.tags.attachment and icons.attachment or "", iw) .. " ", "EmailAttachment" }
-  local who = M.oneline(message.authors or M.sender(message.headers.From))
+  local who = M.oneline(message.authors or message.sender)
   local badge = (message.total or 1) > 1 and (" " .. message.total) or ""
   local name = M.fit(who, SENDER_WIDTH - #badge)
   segments[#segments + 1] = { name, unread and "EmailSenderUnread" or "EmailSender" }
