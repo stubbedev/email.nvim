@@ -19,7 +19,10 @@ function M.open(search)
   if layout.is_open() then
     layout.focus("list")
   else
-    state.folder = state.folder or sidebar.folders()[1]
+    state.folder = state.folder
+      or vim.iter(sidebar.folders()):find(function(folder)
+        return not folder.smart
+      end)
     layout.open()
     actions.bind(state.buf.list, { "global", "list" })
     actions.bind(state.buf.sidebar, { "global", "sidebar" })

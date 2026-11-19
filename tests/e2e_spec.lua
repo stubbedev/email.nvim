@@ -697,9 +697,13 @@ describe("e2e: smart folders are saved searches above the accounts, with unread 
   eq(true, lines[1]:find("Smart", 1, true) ~= nil)
   eq(true, lines[2]:find("Flagged", 1, true) ~= nil)
   eq(true, lines[2]:find("1 $") ~= nil)
-  eq(true, state.folder.smart)
+  eq(nil, state.folder.smart)
+  eq(1, state.folder.account)
+  vim.api.nvim_set_current_win(state.win.sidebar)
+  vim.api.nvim_win_set_cursor(state.win.sidebar, { 2, 0 })
+  keys("<CR>")
   wait("the smart folder's list", function()
-    return state.busy == 0 and #state.threads == 1
+    return state.busy == 0 and state.folder.smart and #state.threads == 1
   end)
   eq("Starred one", state.threads[1].headers.Subject)
   vim.api.nvim_set_current_win(state.win.list)
