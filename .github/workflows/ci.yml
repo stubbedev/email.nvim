@@ -14,6 +14,28 @@ permissions:
   contents: read
 
 jobs:
+  engine:
+    name: engine (go test, golangci-lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y notmuch libnotmuch-dev
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - run: go vet ./...
+      - run: go test -race ./...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          working-directory: engine
+          version: v2.14
+          install-mode: golangci-lint
+          args: --issues-exit-code=1 --timeout 5m
+
   test:
     name: tests (nvim ${{ matrix.nvim }})
     runs-on: ubuntu-latest
@@ -23,7 +45,13 @@ jobs:
         nvim: [v0.11.5, stable]
     steps:
       - uses: actions/checkout@v7
-      - run: sudo apt-get update && sudo apt-get install -y notmuch
+      - run: sudo apt-get update && sudo apt-get install -y notmuch libnotmuch-dev
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - run: go build -o ../bin/email-engine ./cmd/email-engine
+        working-directory: engine
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true
@@ -40,3 +68,28 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           version: latest
           args: --check .
+
+  nix:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v23
+      - uses: stubbedev/xilo@v2
+        with:
+          url: https://xilos.dev
+          cache: stubbedev/main
+          token: ${{ secrets.XILO_TOKEN }}
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock', '**/go.sum') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
+          gc-max-store-size-linux: 5G
+      - run: nix flake check --print-build-logs

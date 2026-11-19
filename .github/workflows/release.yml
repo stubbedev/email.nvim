@@ -1,0 +1,78 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: email-engine (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-amd64
+            os: ubuntu-22.04
+          - platform: linux-arm64
+            os: ubuntu-22.04-arm
+          - platform: darwin-arm64
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Tag matches engine/VERSION
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < engine/VERSION)"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match engine/VERSION $version" >&2
+            exit 1
+          fi
+      - name: Install notmuch (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libnotmuch-dev
+      - name: Install notmuch (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install notmuch
+          prefix="$(brew --prefix)"
+          echo "CGO_CFLAGS=-I$prefix/include" >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-L$prefix/lib" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - name: Build
+        shell: bash
+        working-directory: engine
+        run: go build -trimpath -ldflags="-s -w" -o "../dist/email-engine-${{ matrix.platform }}" ./cmd/email-engine
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.platform }}
+          path: dist/email-engine-*
+          retention-days: 7
+
+  release:
+    name: publish github release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum email-engine-* > sha256sums.txt
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
