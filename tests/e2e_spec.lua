@@ -838,3 +838,17 @@ describe("e2e: quitting the full layout exits Neovim when nothing else is open, 
   state.config.layout = "float"
   eq({}, errors)
 end)
+
+describe("e2e: EmailOpen opens the newest matching conversation straight away", function()
+  require("email.ui.layout").close()
+  local thread =
+    vim.trim(vim.system({ "notmuch", "search", "--output=threads", "id:star@example.org" }):wait().stdout or "")
+  vim.cmd("EmailOpen " .. thread)
+  wait("the conversation", function()
+    return state.current ~= nil and state.busy == 0
+  end)
+  eq("star@example.org", state.current.id)
+  eq(state.win.reader, vim.api.nvim_get_current_win())
+  keys("q")
+  eq({}, errors)
+end)

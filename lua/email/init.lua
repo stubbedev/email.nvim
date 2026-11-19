@@ -14,7 +14,7 @@ local function configured()
   return state.config or error("email.nvim: call require('email').setup() first", 0)
 end
 
-function M.open(search)
+function M.open(search, open_first)
   configured()
   if layout.is_open() then
     layout.focus("list")
@@ -34,6 +34,12 @@ function M.open(search)
     actions.reload()
     state.lastmod = notmuch.lastmod()
     actions.start_polling()
+    if open_first then
+      if #state.threads == 0 then
+        error(("no conversation matches %s"):format(search), 0)
+      end
+      actions.handlers.open()
+    end
   end)
 end
 
@@ -56,6 +62,9 @@ function M.setup(opts)
   vim.api.nvim_create_user_command("EmailSearch", function(args)
     M.open(args.args)
   end, { nargs = 1, desc = "Search email with a notmuch query" })
+  vim.api.nvim_create_user_command("EmailOpen", function(args)
+    M.open(args.args, true)
+  end, { nargs = 1, desc = "Open the newest conversation matching a notmuch query" })
 end
 
 return M
