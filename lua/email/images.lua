@@ -93,7 +93,7 @@ local function write(dir, index, content_type, data)
   return path
 end
 
-function M.resolve(message, reference, dir, index, options)
+function M.resolve(message, reference, dir, index)
   local source = reference.source
   local cid = source:match("^cid:(.+)$")
   local part = cid and part_by_content_id(message, cid)
@@ -110,23 +110,38 @@ function M.resolve(message, reference, dir, index, options)
     end
     return write(dir, index, content_type, data)
   end
-  if options.remote and source:match("^https?://") then
-    local path = ("%s/image-%d"):format(dir, index)
-    async.checked({
-      "curl",
-      "--fail",
-      "--silent",
-      "--show-error",
-      "--location",
-      "--max-time",
-      "20",
-      "--output",
-      path,
-      source,
-    })
-    return path
-  end
   return nil
+end
+
+local function download_all(jobs)
+  local results = {}
+  if #jobs == 0 then
+    return results
+  end
+  local remaining = #jobs
+  async.await(function(resolve)
+    for i, job in ipairs(jobs) do
+      vim.system({
+        "curl",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--location",
+        "--max-time",
+        "15",
+        "--output",
+        job.path,
+        job.url,
+      }, {}, function(result)
+        results[i] = result
+        remaining = remaining - 1
+        if remaining == 0 then
+          resolve()
+        end
+      end)
+    end
+  end)
+  return results
 end
 
 function M.clear()
@@ -142,10 +157,9 @@ function M.show(message, references, buf, win, first_row)
   local dir = vim.fn.tempname()
   vim.fn.mkdir(dir, "p")
   local api = require("image")
-  for index, reference in ipairs(references) do
-    local path = M.resolve(message, reference, dir, index, options)
+  local function place(reference, path)
     if not state.current or state.current.id ~= message.id or not vim.api.nvim_win_is_valid(win) then
-      return
+      return false
     end
     if path then
       local image = api.from_file(path, {
@@ -162,6 +176,29 @@ function M.show(message, references, buf, win, first_row)
         image:render()
         shown[#shown + 1] = image
       end
+    end
+    return true
+  end
+  local remote = {}
+  for index, reference in ipairs(references) do
+    if reference.source:match("^https?://") then
+      if options.remote then
+        remote[#remote + 1] =
+          { reference = reference, url = reference.source, path = ("%s/image-%d"):format(dir, index) }
+      end
+    elseif not place(reference, M.resolve(message, reference, dir, index)) then
+      return
+    end
+  end
+  for i, result in ipairs(download_all(remote)) do
+    local job = remote[i]
+    if result.code ~= 0 then
+      vim.notify(
+        ("email.nvim: could not fetch image %s: %s"):format(job.url, vim.trim(result.stderr or "")),
+        vim.log.levels.WARN
+      )
+    elseif not place(job.reference, job.path) then
+      return
     end
   end
 end

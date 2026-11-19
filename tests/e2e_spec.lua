@@ -82,10 +82,12 @@ write(
 vim.env.NOTMUCH_CONFIG = config_path
 assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
 
-local errors = {}
+local errors, warnings = {}, {}
 vim.notify = function(msg, level)
   if level == vim.log.levels.ERROR then
     errors[#errors + 1] = msg
+  elseif level == vim.log.levels.WARN then
+    warnings[#warnings + 1] = msg
   end
 end
 vim.o.columns, vim.o.lines = 160, 50
@@ -110,7 +112,7 @@ require("email").setup({
       return (html:gsub('<img src="([^"]+)" alt="([^"]*)">', "![%2](%1)"):gsub("<[^>]+>", ""))
     end,
   },
-  images = { enabled = true },
+  images = { enabled = true, remote = true },
   send_cmd = { "sh", "-c", 'cat > "$0"', sent_path },
   refresh_interval = 0,
 })
@@ -283,7 +285,9 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
       "--r",
       "Content-Type: text/html; charset=utf-8",
       "",
-      '<p>Logo</p><img src="cid:logo@x" alt="Logo"><p>Inline</p><img src="data:image/png;base64,' .. png .. '" alt="">',
+      '<p>Logo</p><img src="cid:logo@x" alt="Logo"><p>Inline</p><img src="data:image/png;base64,'
+        .. png
+        .. '" alt=""><img src="http://127.0.0.1:9/gone.png" alt="gone">',
       "--r",
       "Content-Type: image/png",
       "Content-ID: <logo@x>",
@@ -323,7 +327,7 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
   for _, image in ipairs(placed) do
     eq(state.win.reader, image.opts.window)
   end
-  eq({ row_of("#image-1"), row_of("#image-1") + 1, row_of("#image-3") }, {
+  eq({ row_of("#image-1"), row_of("#image-1") + 1, row_of("#image-4") }, {
     placed[1].opts.y,
     placed[2].opts.y,
     placed[3].opts.y,
@@ -332,6 +336,11 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
   eq("\137PNG\r\n\26\n", assert(io.open(placed[2].path, "rb")):read("*a"))
   eq(true, placed[3].path:match("%.jpg$") ~= nil)
   eq(nil, table.concat(lines, "\n"):find("base64", 1, true))
+  wait("warning about the unreachable remote image", function()
+    return #warnings == 1
+  end)
+  eq(true, warnings[1]:find("could not fetch image http://127.0.0.1:9/gone.png", 1, true) ~= nil)
+  eq(3, #placed)
   keys("q")
   eq(true, placed[1].cleared and placed[2].cleared and placed[3].cleared)
   eq({}, errors)
