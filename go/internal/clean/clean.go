@@ -78,17 +78,28 @@ func TokeniseImages(rootp *dom.Node) []Image {
 		}
 		el.InsertBefore(dom.NewText(ImageToken(len(images))))
 		el.Detach()
-		images = append(images, Image{Alt: strings.Join(strings.Fields(alt), " "), Src: strings.TrimSpace(src)})
+		images = append(images, Image{Alt: strings.Join(strings.Fields(alt), " "), Src: imageSource(src)})
 	}
 	return images
 }
 
 var tinyStyleRe = regexp.MustCompile(`(?:^|;)(?:width|height):0*[0-2](?:px)?(?:;|$)`)
 
+func imageSource(src string) string {
+	src = strings.TrimSpace(src)
+	if strings.HasPrefix(strings.ToLower(src), "data:") {
+		return strings.Join(strings.Fields(src), "")
+	}
+	return src
+}
+
 func isContentImage(el *dom.Node) bool {
 	src, _ := el.Attr("src")
-	src = strings.ToLower(strings.TrimSpace(src))
-	if !strings.HasPrefix(src, "cid:") && !strings.HasPrefix(src, "https://") && !strings.HasPrefix(src, "http://") {
+	src = strings.ToLower(imageSource(src))
+	switch {
+	case strings.HasPrefix(src, "cid:"), strings.HasPrefix(src, "https://"), strings.HasPrefix(src, "http://"):
+	case strings.HasPrefix(src, "data:image/") && strings.Contains(src, ";base64,"):
+	default:
 		return false
 	}
 	for _, name := range []string{"width", "height"} {

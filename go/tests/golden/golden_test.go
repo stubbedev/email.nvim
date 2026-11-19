@@ -67,7 +67,9 @@ var goldenImages = []struct {
 	{"image_linked_logo", "<a href=\"https://x.com/\"><img src=\"https://x.com/logo.png\" alt=\"X\"></a><p>body</p>", "[![X](https://x.com/logo.png)](https://x.com/)\n\nbody"},
 	{"image_tracking_pixel", "<p>body</p><img src=\"https://t.x.com/o.gif\" width=\"1\" height=\"1\">", "body"},
 	{"image_spacer_style", "<p>body</p><img src=\"https://x.com/s.gif\" style=\"width: 1px; height: 1px\">", "body"},
-	{"image_data_uri", "<p>body</p><img src=\"data:image/png;base64,AAAA\">", "body"},
+	{"image_data_uri", "<p>body</p><img src=\"data:image/png;base64,iVBO\nRw0K\" alt=\"pic\">", "body\n\n![pic](data:image/png;base64,iVBORw0K)"},
+	{"image_data_non_image", "<p>body</p><img src=\"data:text/html;base64,PGI+\">", "body"},
+	{"image_data_not_base64", "<p>body</p><img src=\"data:image/svg+xml,%3Csvg%3E\">", "body"},
 	{"image_alt_escaped", "<p><img src=\"cid:a\" alt=\"a [b] c\"></p>", "![a \\[b\\] c](cid:a)"},
 	{"image_src_with_space", "<p><img src=\"https://x.com/a b.png\" title=\"T\"></p>", "![T](<https://x.com/a b.png>)"},
 }
