@@ -578,7 +578,7 @@ describe("e2e: delete moves to the trash, undo brings it back, and deleting from
   end)
   eq(0, asked)
   eq(0, #vim.fn.glob(mail .. "/acct/INBOX/*/1007*", false, true))
-  local tags = vim.system({ "notmuch", "search", "--output=tags", "id:trash@example.org" }):wait().stdout
+  local tags = vim.system({ "notmuch", "search", "--output=tags", "id:trash@example.org" }):wait().stdout or ""
   eq(nil, tags:find("inbox", 1, true))
 
   keys("U")
@@ -586,7 +586,7 @@ describe("e2e: delete moves to the trash, undo brings it back, and deleting from
     return #files("Trash") == 0 and state.busy == 0
   end)
   eq(1, #vim.fn.glob(mail .. "/acct/INBOX/cur/1007*", false, true))
-  tags = vim.system({ "notmuch", "search", "--output=tags", "id:trash@example.org" }):wait().stdout
+  tags = vim.system({ "notmuch", "search", "--output=tags", "id:trash@example.org" }):wait().stdout or ""
   eq(true, tags:find("inbox", 1, true) ~= nil)
 
   keys("d")
