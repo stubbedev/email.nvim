@@ -44,7 +44,7 @@ func fixture(t *testing.T) (*mailtest.Mail, *Engine) {
 
 func TestThreadsCountsAndConversations(t *testing.T) {
 	_, e := fixture(t)
-	page, err := e.Threads("folder:acct/INBOX", 0, 0, 10, true)
+	page, err := e.Threads("folder:acct/INBOX", 0, 0, 10, true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestThreadsCountsAndConversations(t *testing.T) {
 	if plans.Subject != "Plans" || plans.Total != 2 || plans.Authors != "Ann, Bob" || len(plans.MessageIDs) != 2 || !slices.Contains(plans.Tags, "unread") {
 		t.Errorf("thread = %+v", plans)
 	}
-	more, err := e.Threads("folder:acct/INBOX", 0, 1, 10, false)
+	more, err := e.Threads("folder:acct/INBOX", 0, 1, 10, false, "")
 	if err != nil || more.Total != nil || len(more.Threads) != 1 || more.Threads[0].ID != plans.ID {
 		t.Errorf("second page = %+v %v", more, err)
 	}
@@ -215,7 +215,7 @@ func TestDraftsAndSending(t *testing.T) {
 	if counts, _ := e.Counts([]string{"tag:sent and subject:Lunch", "tag:replied and id:p1@example.org", "tag:draft"}); !slices.Equal(counts, []int{1, 1, 0}) {
 		t.Errorf("counts after send = %v", counts)
 	}
-	page, _ := e.Threads("tag:sent and subject:Lunch", 0, 0, 1, false)
+	page, _ := e.Threads("tag:sent and subject:Lunch", 0, 0, 1, false, "")
 	sent, err := e.Message(page.Threads[0].MessageIDs[0], nil, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +302,7 @@ func TestPagingCachingAndPrefetch(t *testing.T) {
 	const q = "folder:acct/INBOX"
 	var paged []string
 	for offset := 0; ; offset += 3 {
-		page, err := e.Threads(q, notmuch.NewestFirst, offset, 3, false)
+		page, err := e.Threads(q, notmuch.NewestFirst, offset, 3, false, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -313,7 +313,7 @@ func TestPagingCachingAndPrefetch(t *testing.T) {
 			break
 		}
 	}
-	whole, err := e.Threads(q, notmuch.NewestFirst, 0, 100, true)
+	whole, err := e.Threads(q, notmuch.NewestFirst, 0, 100, true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestPagingCachingAndPrefetch(t *testing.T) {
 	if n, _ := e.CountThreads("tag:inbox and folder:acct/INBOX"); n != len(all)-1 {
 		t.Errorf("count after a write = %d, want %d (stale cache)", n, len(all)-1)
 	}
-	page, _ := e.Threads(q, notmuch.NewestFirst, 0, 100, false)
+	page, _ := e.Threads(q, notmuch.NewestFirst, 0, 100, false, "")
 	if !slices.ContainsFunc(page.Threads, func(th ThreadSummary) bool {
 		return slices.Contains(th.MessageIDs, "bulk0@example.org") && !slices.Contains(th.Tags, "inbox")
 	}) {
@@ -352,7 +352,7 @@ func TestRenderedDocsAndTheViewCache(t *testing.T) {
 	_, e := fixture(t)
 	e.markdown = doc.Options{Headings: []string{"# "}, Bullets: []string{"*"}, Quote: "|", Link: "L ", Email: "E ", Image: "I ", Types: []string{"text/html", "text/plain"}}
 	r := &Render{Width: 40}
-	page, err := e.Threads("folder:acct/INBOX", notmuch.NewestFirst, 0, 10, false)
+	page, err := e.Threads("folder:acct/INBOX", notmuch.NewestFirst, 0, 10, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,5 +385,24 @@ func TestRenderedDocsAndTheViewCache(t *testing.T) {
 	laid, err := e.Layout(raw.Blocks, *r)
 	if err != nil || !slices.Equal(laid.Lines, []string{"first"}) {
 		t.Errorf("layout = %+v %v", laid, err)
+	}
+}
+
+func TestUnchangedPagesAreNotResent(t *testing.T) {
+	_, e := fixture(t)
+	first, err := e.Threads("folder:acct/INBOX", notmuch.NewestFirst, 0, 10, false, "")
+	if err != nil || first.Unchanged || len(first.Threads) == 0 || first.Revision == "" {
+		t.Fatalf("first = %+v %v", first, err)
+	}
+	same, _ := e.Threads("folder:acct/INBOX", notmuch.NewestFirst, 0, 10, false, first.Revision)
+	if !same.Unchanged || same.Threads != nil {
+		t.Errorf("an unchanged page was resent: %+v", same)
+	}
+	if err := e.Tag([]string{"p1@example.org"}, []string{"+flagged"}); err != nil {
+		t.Fatal(err)
+	}
+	changed, _ := e.Threads("folder:acct/INBOX", notmuch.NewestFirst, 0, 10, false, first.Revision)
+	if changed.Unchanged || len(changed.Threads) == 0 || changed.Revision == first.Revision {
+		t.Errorf("a page changed by a write was reported unchanged: %+v", changed)
 	}
 }

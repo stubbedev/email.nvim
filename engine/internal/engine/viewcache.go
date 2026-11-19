@@ -16,6 +16,7 @@ type renderedView struct {
 	sender      string
 	headerLines []string
 	doc         *doc.Doc
+	docJSON     []byte
 	size        int
 }
 

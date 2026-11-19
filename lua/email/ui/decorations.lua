@@ -18,7 +18,14 @@ end
 
 function M.span(rows, row, start_col, end_col, group)
   local entry = row_of(rows, row)
-  entry[#entry + 1] = { start_col, end_col, group }
+  local n = #entry
+  entry[n + 1], entry[n + 2], entry[n + 3] = start_col, end_col, group
+end
+
+function M.entry(rows, row)
+  local entry = {}
+  rows[row] = entry
+  return entry
 end
 
 function M.line(rows, row, group)
@@ -27,8 +34,10 @@ end
 
 function M.link(rows, row, start_col, end_col, url)
   local entry = row_of(rows, row)
-  entry.links = entry.links or {}
-  entry.links[#entry.links + 1] = { start_col, end_col, url }
+  local links = entry.links or {}
+  entry.links = links
+  local n = #links
+  links[n + 1], links[n + 2], links[n + 3] = start_col, end_col, url
 end
 
 function M.set(buf, rows)
@@ -44,27 +53,26 @@ function M.set(buf, rows)
   by_buf[buf] = rows
 end
 
+local set_extmark = vim.api.nvim_buf_set_extmark
+local line_opts = { ephemeral = true, strict = false }
+local span_opts = { ephemeral = true, strict = false }
+local link_opts = { ephemeral = true, strict = false }
+
 local function paint(buf, row, entry)
   if entry.line then
-    vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { line_hl_group = entry.line, ephemeral = true, strict = false })
+    line_opts.line_hl_group = entry.line
+    set_extmark(buf, ns, row, 0, line_opts)
   end
-  for _, span in ipairs(entry) do
-    vim.api.nvim_buf_set_extmark(
-      buf,
-      ns,
-      row,
-      span[1],
-      { end_col = span[2], hl_group = span[3], ephemeral = true, strict = false }
-    )
+  for i = 1, #entry, 3 do
+    span_opts.end_col, span_opts.hl_group = entry[i + 1], entry[i + 2]
+    set_extmark(buf, ns, row, entry[i], span_opts)
   end
-  for _, link in ipairs(entry.links or {}) do
-    vim.api.nvim_buf_set_extmark(
-      buf,
-      ns,
-      row,
-      link[1],
-      { end_col = link[2], url = link[3], ephemeral = true, strict = false }
-    )
+  local links = entry.links
+  if links then
+    for i = 1, #links, 3 do
+      link_opts.end_col, link_opts.url = links[i + 1], links[i + 2]
+      set_extmark(buf, ns, row, links[i], link_opts)
+    end
   end
 end
 

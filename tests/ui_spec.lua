@@ -53,5 +53,5 @@ describe("row lays out status, sender, subject and a right-aligned date in the w
   eq(true, line:find("● @ Jane Doe", 1, true) ~= nil)
   eq(true, line:find("Hello there", 1, true) ~= nil)
   eq(true, line:find("09:05 $") ~= nil)
-  eq("EmailUnread", highlights[1][3])
+  eq("EmailUnread", highlights[3])
 end)

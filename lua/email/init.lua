@@ -30,7 +30,7 @@ function M.open(search, open_first)
   async.run(function()
     actions.reload()
     state.lastmod = engine.revision()
-    actions.prefetch()
+    async.run(actions.prefetch)
     actions.start_polling()
     if open_first then
       if #state.threads == 0 then

@@ -93,6 +93,7 @@ type Engine struct {
 	cursor   cursor
 	views    viewCache
 	readers  chan *notmuch.Database
+	jobs     background
 }
 
 func New(cfg Config) (*Engine, error) {

@@ -18,6 +18,7 @@ local PLAIN_WINDOW = {
 local group = vim.api.nvim_create_augroup("email.nvim.layout", { clear = true })
 local SPINNER_DELAY, SPINNER_INTERVAL = 120, 80
 local spinner_timer, spinner_frame, spinner_label, spinner_running
+local reader_buf
 local bars = {}
 local saved_mouse
 
@@ -246,6 +247,8 @@ function M.close()
   for _, name in ipairs({ "reader", "sidebar", "list" }) do
     wipe(state.buf[name])
   end
+  wipe(reader_buf)
+  reader_buf = nil
   state.win, state.buf, state.reading, state.current = {}, {}, false, nil
   state.thread, state.sections = nil, nil
   bars = {}
@@ -313,26 +316,37 @@ function M.open()
   watch()
 end
 
+local function reader_buffer()
+  if reader_buf and vim.api.nvim_buf_is_valid(reader_buf) then
+    return reader_buf
+  end
+  reader_buf = scratch("email-message")
+  if state.config.reader_mouse then
+    vim.api.nvim_create_autocmd("WinEnter", { group = group, buffer = reader_buf, callback = mouse_on })
+    vim.api.nvim_create_autocmd(
+      { "WinLeave", "BufWipeout" },
+      { group = group, buffer = reader_buf, callback = mouse_off }
+    )
+  end
+  return reader_buf
+end
+
 function M.open_reader()
   if valid(state.win.reader) then
     return state.buf.reader
   end
   state.reading = true
-  local buf = scratch("email-message")
+  local buf = reader_buffer()
   local win
   if full() then
-    vim.cmd.tabnew()
+    vim.cmd("tab split")
     win = vim.api.nvim_get_current_win()
-    local placeholder = vim.api.nvim_get_current_buf()
     vim.api.nvim_win_set_buf(win, buf)
-    wipe(placeholder)
   else
     win = float_window(buf, true, geometry().reader, "Email")
   end
   register("reader", win, buf, "Email")
   if state.config.reader_mouse then
-    vim.api.nvim_create_autocmd("WinEnter", { group = group, buffer = buf, callback = mouse_on })
-    vim.api.nvim_create_autocmd({ "WinLeave", "BufWipeout" }, { group = group, buffer = buf, callback = mouse_off })
     mouse_on()
   end
   vim.wo[win].wrap = true
@@ -347,13 +361,11 @@ end
 function M.close_reader()
   images.clear()
   mouse_off()
-  local buf = state.buf.reader
   if valid(state.win.reader) then
     state.closing = true
     close_window(state.win.reader)
     state.closing = false
   end
-  wipe(buf)
   bars.reader = nil
   state.win.reader, state.buf.reader, state.reading, state.current = nil, nil, false, nil
   state.thread, state.sections = nil, nil

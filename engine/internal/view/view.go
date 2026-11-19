@@ -40,14 +40,14 @@ type Image struct {
 }
 
 type Calendar struct {
-	Content string `json:"content"`
+	Content string `json:"-"`
 	Method  string `json:"method,omitempty"`
 	Summary string `json:"summary,omitempty"`
 }
 
 type View struct {
 	Headers     map[string]string `json:"headers"`
-	Blocks      []Block           `json:"blocks"`
+	Blocks      []Block           `json:"blocks,omitempty"`
 	Attachments []Attachment      `json:"attachments"`
 	Calendars   []Calendar        `json:"calendars"`
 	Images      []Image           `json:"images"`

@@ -8,9 +8,29 @@ local state = require("email.state")
 local M = {}
 
 local PAUSE_EVERY = 64
+local SNAPSHOT_LIMIT = 32
 
 local generation = 0
 local shown = { count = 0, width = 0, rows = decorations.rows() }
+local snapshots, snapshot_count = {}, 0
+
+local function forget()
+  if shown.key and snapshots[shown.key] then
+    snapshots[shown.key] = nil
+    snapshot_count = snapshot_count - 1
+  end
+  shown.key = nil
+end
+
+local function remember(key, snapshot)
+  if snapshot_count >= SNAPSHOT_LIMIT then
+    snapshots, snapshot_count = {}, 0
+  end
+  if not snapshots[key] then
+    snapshot_count = snapshot_count + 1
+  end
+  snapshots[key] = snapshot
+end
 
 local function title()
   local folder = state.folder
@@ -37,26 +57,23 @@ local function window()
   return nil
 end
 
-local function row_into(rows, index, width, now)
-  local thread = state.threads[index]
+local function row_into(rows, index, width, now, threads)
+  local thread = threads[index]
   local marked = state.marked[thread.id]
-  local line, highlights = format.row(thread, width, state.config.icons, now, marked)
-  local row = index - 1
-  rows[row] = nil
-  for _, hl in ipairs(highlights) do
-    decorations.span(rows, row, hl[1], hl[2], hl[3])
-  end
+  local entry = decorations.entry(rows, index - 1)
+  local line = format.row(thread, width, state.config.icons, now, marked, entry)
   if marked then
-    decorations.line(rows, row, "EmailMarked")
+    entry.line = "EmailMarked"
   end
   return line
 end
 
-local function build(from, to, width, rows)
+local function build(from, to, width, rows, threads)
+  threads = threads or state.threads
   local now = os.time()
   local lines = {}
   for index = from, to do
-    lines[#lines + 1] = row_into(rows, index, width, now)
+    lines[#lines + 1] = row_into(rows, index, width, now, threads)
     if index % PAUSE_EVERY == 0 then
       async.pause()
     end
@@ -73,7 +90,48 @@ end
 
 M.chrome = chrome
 
-function M.render(keep_id)
+local function place_cursor(win, keep_id, count)
+  local cursor = 1
+  for index, thread in ipairs(state.threads) do
+    if thread.id == keep_id then
+      cursor = index
+      break
+    end
+  end
+  vim.api.nvim_win_set_cursor(win, { math.min(cursor, math.max(count, 1)), 0 })
+end
+
+function M.prepare(key, threads)
+  local _, win = window()
+  if not win or snapshots[key] or #threads == 0 then
+    return
+  end
+  local width = vim.api.nvim_win_get_width(win)
+  local rows = decorations.rows()
+  local lines = build(1, #threads, width, rows, threads)
+  remember(key, { lines = lines, rows = rows, width = width, count = #threads })
+end
+
+function M.restore(key, keep_id)
+  local buf, win = window()
+  local snapshot = snapshots[key]
+  if not buf or not win or not snapshot then
+    return false
+  end
+  if snapshot.width ~= vim.api.nvim_win_get_width(win) or snapshot.count ~= #state.threads then
+    return false
+  end
+  generation = generation + 1
+  keep_id = keep_id or (M.selected() or {}).id
+  layout.set_lines(buf, snapshot.lines)
+  decorations.set(buf, snapshot.rows)
+  shown = { count = snapshot.count, width = snapshot.width, rows = snapshot.rows, key = key }
+  place_cursor(win, keep_id, snapshot.count)
+  chrome()
+  return true
+end
+
+function M.render(keep_id, key)
   local buf, win = window()
   if not buf or not win then
     return
@@ -96,15 +154,11 @@ function M.render(keep_id)
   end
   layout.set_lines(buf, lines)
   decorations.set(buf, rows)
-  shown = { count = count, width = width, rows = rows }
-  local cursor = 1
-  for index, thread in ipairs(state.threads) do
-    if thread.id == keep_id then
-      cursor = index
-      break
-    end
+  shown = { count = count, width = width, rows = rows, key = key }
+  if key and next(state.marked) == nil then
+    remember(key, { lines = lines, rows = rows, width = width, count = count })
   end
-  vim.api.nvim_win_set_cursor(win, { math.min(cursor, math.max(count, 1)), 0 })
+  place_cursor(win, keep_id, count)
   chrome()
 end
 
@@ -117,6 +171,7 @@ function M.append()
   if shown.count == 0 or width ~= shown.width or shown.count > #state.threads then
     return M.render()
   end
+  forget()
   generation = generation + 1
   local mine = generation
   local from, to = shown.count + 1, #state.threads
@@ -144,11 +199,12 @@ function M.update(indices)
   if width ~= shown.width then
     return M.render()
   end
+  forget()
   local now = os.time()
   vim.bo[buf].modifiable = true
   for _, index in ipairs(indices) do
     if state.threads[index] then
-      local line = row_into(shown.rows, index, width, now)
+      local line = row_into(shown.rows, index, width, now, state.threads)
       vim.api.nvim_buf_set_lines(buf, index - 1, index, false, { line })
     end
   end

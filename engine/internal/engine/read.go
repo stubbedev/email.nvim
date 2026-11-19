@@ -2,6 +2,7 @@ package engine
 
 import (
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -30,19 +31,22 @@ type ThreadSummary struct {
 }
 
 type ThreadPage struct {
-	Total   *int            `json:"total,omitempty"`
-	Threads []ThreadSummary `json:"threads"`
+	Total     *int            `json:"total,omitempty"`
+	Threads   []ThreadSummary `json:"threads,omitempty"`
+	Revision  string          `json:"revision"`
+	Unchanged bool            `json:"unchanged,omitempty"`
 }
 
 type MessageView struct {
-	ID          string   `json:"id"`
-	Timestamp   int64    `json:"timestamp"`
-	Tags        []string `json:"tags"`
-	Files       []string `json:"files"`
-	Accounts    []int    `json:"accounts"`
-	Sender      string   `json:"sender"`
-	HeaderLines []string `json:"header_lines"`
-	Doc         *doc.Doc `json:"doc,omitempty"`
+	ID          string          `json:"id"`
+	Timestamp   int64           `json:"timestamp"`
+	Tags        []string        `json:"tags"`
+	Files       []string        `json:"files"`
+	Accounts    []int           `json:"accounts"`
+	Sender      string          `json:"sender"`
+	HeaderLines []string        `json:"header_lines"`
+	Doc         *doc.Doc        `json:"-"`
+	DocJSON     json.RawMessage `json:"doc,omitempty"`
 	view.View
 }
 
@@ -135,10 +139,14 @@ func (e *Engine) viewOf(m notmuch.Message, opts view.Options, r *Render) (Messag
 		}
 		e.views.put(key, entry)
 	}
-	return MessageView{
+	v := MessageView{
 		ID: m.ID, Timestamp: m.Date, Tags: m.Tags, Files: m.Files, Accounts: accounts,
-		Sender: entry.sender, HeaderLines: entry.headerLines, Doc: entry.doc, View: entry.view,
-	}, nil
+		Sender: entry.sender, HeaderLines: entry.headerLines, Doc: entry.doc, DocJSON: entry.docJSON, View: entry.view,
+	}
+	if v.Doc != nil {
+		v.Blocks = nil
+	}
+	return v, nil
 }
 
 func (e *Engine) render(parsed *message.Message, opts view.Options, r *Render) (renderedView, error) {
@@ -153,6 +161,9 @@ func (e *Engine) render(parsed *message.Message, opts view.Options, r *Render) (
 			return renderedView{}, err
 		}
 		entry.doc = &rendered
+		if entry.docJSON, err = json.Marshal(rendered); err != nil {
+			return renderedView{}, fmt.Errorf("encoding the rendered message: %w", err)
+		}
 	}
 	entry.size = sizeOf(entry.view, entry.doc)
 	return entry, nil
@@ -194,21 +205,33 @@ func (e *Engine) Message(id string, alternatives []string, r *Render) (MessageVi
 }
 
 func (e *Engine) Warm(ids []string, r *Render) {
-	go func() {
-		for _, id := range ids {
-			if _, err := e.Thread(id, r); err != nil {
-				fmt.Fprintf(os.Stderr, "email-engine: warming thread %s: %v\n", id, err)
-			}
-		}
-	}()
+	jobs := make([]job, len(ids))
+	for i, id := range ids {
+		jobs[i] = job{name: "warming thread " + id, run: func() error {
+			_, err := e.thread(id, r, 1)
+			return err
+		}}
+	}
+	e.jobs.schedule(true, jobs)
 }
 
 func (e *Engine) Thread(id string, r *Render) ([]MessageView, error) {
+	return e.thread(id, r, runtime.GOMAXPROCS(0))
+}
+
+func (e *Engine) thread(id string, r *Render, workers int) ([]MessageView, error) {
 	var views []MessageView
 	err := e.read(func(db *notmuch.Database) error {
-		messages, err := db.Messages("thread:"+id, notmuch.OldestFirst, 0)
-		if err != nil {
-			return err
+		key, revision := "thread\x00"+id, revisionOf(db)
+		var messages []notmuch.Message
+		if value, ok := e.cache.get(key, revision); ok {
+			messages = value.([]notmuch.Message)
+		} else {
+			var err error
+			if messages, err = db.Messages("thread:"+id, notmuch.OldestFirst, 0); err != nil {
+				return err
+			}
+			e.cache.put(key, revision, messages)
 		}
 		if len(messages) == 0 {
 			return fmt.Errorf("thread %s has no messages", id)
@@ -217,7 +240,7 @@ func (e *Engine) Thread(id string, r *Render) ([]MessageView, error) {
 		errs := make([]error, len(messages))
 		jobs := make(chan int)
 		var wg sync.WaitGroup
-		for range min(runtime.GOMAXPROCS(0), len(messages)) {
+		for range min(workers, len(messages)) {
 			wg.Go(func() {
 				for i := range jobs {
 					views[i], errs[i] = e.viewOf(messages[i], e.view, r)

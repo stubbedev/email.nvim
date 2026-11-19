@@ -3,7 +3,6 @@ package engine
 import (
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/stubbedev/email.nvim/engine/internal/notmuch"
@@ -128,7 +127,7 @@ func (e *Engine) CountThreads(query string) (int, error) {
 	return n, nil
 }
 
-func (e *Engine) Threads(query string, sort notmuch.Sort, offset, limit int, count bool) (ThreadPage, error) {
+func (e *Engine) Threads(query string, sort notmuch.Sort, offset, limit int, count bool, known string) (ThreadPage, error) {
 	page := ThreadPage{}
 	if count {
 		total, err := e.CountThreads(query)
@@ -140,6 +139,11 @@ func (e *Engine) Threads(query string, sort notmuch.Sort, offset, limit int, cou
 	revision, err := e.Revision()
 	if err != nil {
 		return page, err
+	}
+	page.Revision = revision
+	if offset == 0 && known == revision {
+		page.Unchanged = true
+		return page, nil
 	}
 	if offset == 0 {
 		if value, ok := e.cache.get(pageKey(query, sort, limit), revision); ok {
@@ -184,13 +188,14 @@ func (e *Engine) warm(query string, limit int) error {
 
 func (e *Engine) Prefetch(queries []string, limit int) <-chan struct{} {
 	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for _, query := range queries {
-			if err := e.warm(query, limit); err != nil {
-				fmt.Fprintf(os.Stderr, "email-engine: prefetching %q: %v\n", query, err)
-			}
-		}
-	}()
+	jobs := make([]job, 0, len(queries)+1)
+	for _, query := range queries {
+		jobs = append(jobs, job{name: fmt.Sprintf("prefetching %q", query), run: func() error { return e.warm(query, limit) }})
+	}
+	jobs = append(jobs, job{name: "prefetch", run: func() error {
+		close(done)
+		return nil
+	}})
+	e.jobs.schedule(false, jobs)
 	return done
 }

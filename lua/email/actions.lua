@@ -78,12 +78,26 @@ function M.refresh_counts()
   sidebar.render()
 end
 
+function M.page_key(q, limit, revision)
+  return ("%s\0%d\0%s"):format(q, limit, revision)
+end
+
 function M.prefetch()
   local queries = {}
   for i, folder in ipairs(sidebar.folders()) do
     queries[i] = folder.query
   end
-  engine.prefetch(queries, state.config.page_size)
+  local limit = state.config.page_size
+  engine.prefetch(queries, limit)
+  for _, q in ipairs(queries) do
+    if q ~= query() then
+      local threads, revision = engine.page(q, limit)
+      if threads and layout.is_open() then
+        state.pages[q] = { revision = revision, limit = limit, threads = threads, exhausted = #threads < limit }
+        list.prepare(M.page_key(q, limit, revision), threads)
+      end
+    end
+  end
 end
 
 function M.load_list(keep_id)
@@ -98,13 +112,26 @@ function M.load_list(keep_id)
       list.chrome()
     end
   end)
-  local threads = engine.threads(q, 0, limit)
+  local cached = state.pages[q]
+  local known = cached and cached.limit == limit and next(state.marked) == nil and cached.revision or nil
+  local threads, revision = engine.page(q, limit, known)
   if generation ~= state.load_generation or not layout.is_open() then
     return
   end
+  local key = M.page_key(q, limit, revision)
+  if not threads then
+    cached = cached or error(("the engine called page %q unchanged, but none was cached"):format(q), 0)
+    state.threads, state.exhausted = cached.threads, cached.exhausted
+    if list.restore(key, keep_id) then
+      M.warm_visible()
+      return
+    end
+    threads = cached.threads
+  end
   state.exhausted = #threads < limit
   state.threads = threads
-  list.render(keep_id)
+  state.pages[q] = { revision = revision, limit = limit, threads = threads, exhausted = state.exhausted }
+  list.render(keep_id, key)
   M.warm_visible()
 end
 
@@ -145,6 +172,7 @@ function M.load_more()
         state.threads[#state.threads + 1] = thread
       end
     end
+    state.pages[query()] = nil
     list.append()
   end)
   state.loading_more = false
@@ -163,7 +191,7 @@ end
 
 function M.reload(keep_id)
   layout.with_busy("Loading", function()
-    M.refresh_counts()
+    async.run(M.refresh_counts)
     M.load_list(keep_id)
   end)
 end
@@ -793,7 +821,7 @@ function M.start_polling()
             state.lastmod = lastmod
             M.refresh_counts()
             M.load_list()
-            M.prefetch()
+            async.run(M.prefetch)
           end
         end)
         state.polling = false

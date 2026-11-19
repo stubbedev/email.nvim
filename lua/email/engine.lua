@@ -45,6 +45,8 @@ local function on_line(line)
   if resolve then
     pending[response.id] = nil
     resolve(response)
+  elseif response.error then
+    vim.notify("email.nvim: email-engine: " .. response.error, vim.log.levels.ERROR)
   end
 end
 
@@ -79,6 +81,12 @@ local function on_stderr(_, data)
   if data then
     stderr = (stderr .. data):sub(-STDERR_TAIL)
   end
+end
+
+local function send(method, params)
+  next_id = next_id + 1
+  local running = process or error(("email-engine is not running: %s"):format(vim.trim(stderr)), 0)
+  running:write(vim.json.encode({ id = next_id, method = method, params = params }) .. "\n")
 end
 
 local function request(method, params)
@@ -188,6 +196,11 @@ function M.call(method, params)
   return request(method, params)
 end
 
+function M.notify(method, params)
+  ensure()
+  send(method, params)
+end
+
 function M.reconfigure()
   if process then
     M.call("configure", configuration())
@@ -227,6 +240,14 @@ local function thread(summary)
   }
 end
 
+function M.page(query, limit, known)
+  local page = M.call("threads", { query = query, offset = 0, limit = limit, known = known })
+  if page.unchanged then
+    return nil, page.revision
+  end
+  return vim.tbl_map(thread, page.threads or {}), page.revision
+end
+
 function M.threads(query, offset, limit)
   return vim.tbl_map(thread, M.call("threads", { query = query, offset = offset, limit = limit }).threads or {})
 end
@@ -236,7 +257,7 @@ function M.count_threads(query)
 end
 
 function M.prefetch(queries, limit)
-  M.call("prefetch", { queries = queries, limit = limit })
+  M.notify("prefetch", { queries = queries, limit = limit })
 end
 
 function M.counts(queries)
@@ -260,7 +281,7 @@ function M.thread(id, render)
 end
 
 function M.warm(ids, render)
-  M.call("warm", { ids = ids, render = render })
+  M.notify("warm", { ids = ids, render = render })
 end
 
 function M.render(blocks, render)

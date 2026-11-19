@@ -9,8 +9,28 @@ M.MAX_LISTED_ATTACHMENTS = 3
 local SENDER_WIDTH = 22
 local DATE_WIDTH = 10
 
+local DATE_CACHE_LIMIT = 4096
+local calendar, calendar_size = {}, 0
+local today, today_of = os.date("*t", 0), 0
+
+local function calendar_of(ts)
+  local t = calendar[ts]
+  if t then
+    return t
+  end
+  if calendar_size >= DATE_CACHE_LIMIT then
+    calendar, calendar_size = {}, 0
+  end
+  t = os.date("*t", ts)
+  calendar[ts], calendar_size = t, calendar_size + 1
+  return t
+end
+
 function M.date(ts, now)
-  local t, n = os.date("*t", ts), os.date("*t", now)
+  if today_of ~= now then
+    today, today_of = os.date("*t", now), now
+  end
+  local t, n = calendar_of(ts), today
   if t.year == n.year and t.yday == n.yday then
     return ("%02d:%02d"):format(t.hour, t.min)
   end
@@ -24,7 +44,18 @@ function M.date(ts, now)
 end
 
 function M.oneline(s)
-  return vim.trim((s or ""):gsub("%s+", " "))
+  s = s or ""
+  if s:find("[\t\n\r\v\f]") or s:find("  ", 1, true) then
+    return vim.trim((s:gsub("%s+", " ")))
+  end
+  local first, last = 1, #s
+  if s:byte(1) == 32 then
+    first = 2
+  end
+  if last >= first and s:byte(last) == 32 then
+    last = last - 1
+  end
+  return (first == 1 and last == #s) and s or s:sub(first, last)
 end
 
 M.fit = text.fit
@@ -57,40 +88,43 @@ local function icon_width(icons)
   return width
 end
 
-function M.row(message, width, icons, now, marked)
+function M.row(message, width, icons, now, marked, highlights)
+  highlights = highlights or {}
   local iw = icon_width(icons)
-  local segments = {}
-  local status, status_hl = M.status_icon(message.tags, icons)
-  local unread = message.tags.unread
-  segments[#segments + 1] = { marked and M.fit(icons.marked, 1) or " ", marked and "EmailMarker" or nil }
-  segments[#segments + 1] = { M.fit(status, iw) .. " ", status_hl }
-  segments[#segments + 1] = { M.fit(message.tags.attachment and icons.attachment or "", iw) .. " ", "EmailAttachment" }
-  local who = M.oneline(message.authors or message.sender)
+  local tags = message.tags
+  local unread = tags.unread
+  local status, status_hl = M.status_icon(tags, icons)
   local badge = (message.total or 1) > 1 and (" " .. message.total) or ""
-  local name = M.fit(who, SENDER_WIDTH - #badge)
-  segments[#segments + 1] = { name, unread and "EmailSenderUnread" or "EmailSender" }
-  segments[#segments + 1] = { badge .. "  ", "EmailCount" }
-  local used = 0
-  for _, segment in ipairs(segments) do
-    used = used + text.width(segment[1])
-  end
-  local subject_width = math.max(10, width - used - DATE_WIDTH - 3)
   local subject = M.oneline(message.headers.Subject)
-  segments[#segments + 1] = {
-    M.fit(subject ~= "" and subject or "(no subject)", subject_width) .. "  ",
-    unread and "EmailSubjectUnread" or "EmailSubject",
-  }
+  local subject_width = math.max(10, width - (3 + 2 * iw + SENDER_WIDTH + 2) - DATE_WIDTH - 3)
   local date = M.date(message.timestamp, now)
-  segments[#segments + 1] = { string.rep(" ", DATE_WIDTH - #date) .. date .. " ", "EmailDate" }
-
-  local parts, highlights = {}, {}
-  local col = 0
-  for _, segment in ipairs(segments) do
-    parts[#parts + 1] = segment[1]
-    if segment[2] then
-      highlights[#highlights + 1] = { col, col + #segment[1], segment[2] }
+  local parts = {
+    marked and M.fit(icons.marked, 1) or " ",
+    M.fit(status, iw) .. " ",
+    M.fit(tags.attachment and icons.attachment or "", iw) .. " ",
+    M.fit(M.oneline(message.authors or message.sender), SENDER_WIDTH - #badge),
+    badge .. "  ",
+    M.fit(subject ~= "" and subject or "(no subject)", subject_width) .. "  ",
+    string.rep(" ", DATE_WIDTH - #date) .. date .. " ",
+  }
+  local groups = {
+    marked and "EmailMarker" or false,
+    status_hl or false,
+    "EmailAttachment",
+    unread and "EmailSenderUnread" or "EmailSender",
+    "EmailCount",
+    unread and "EmailSubjectUnread" or "EmailSubject",
+    "EmailDate",
+  }
+  local col, n = 0, #highlights
+  for k = 1, 7 do
+    local stop = col + #parts[k]
+    local group = groups[k]
+    if group then
+      highlights[n + 1], highlights[n + 2], highlights[n + 3] = col, stop, group
+      n = n + 3
     end
-    col = col + #segment[1]
+    col = stop
   end
   return table.concat(parts), highlights
 end

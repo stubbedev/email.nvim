@@ -109,7 +109,7 @@ func addTools(s *mcp.Server, e *engine.Engine) {
 		default:
 			return nil, nil, fmt.Errorf("sort must be newest-first or oldest-first, got %q", a.Sort)
 		}
-		page, err := e.Threads(a.Query, sort, max(a.Offset, 0), limitOr(a.Limit), false)
+		page, err := e.Threads(a.Query, sort, max(a.Offset, 0), limitOr(a.Limit), false, "")
 		if err != nil {
 			return nil, nil, err
 		}

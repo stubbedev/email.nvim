@@ -50,7 +50,7 @@ func decode[T any](params json.RawMessage) (T, error) {
 	return out, nil
 }
 
-func method[P any, R any](fn func(ctx context.Context, e *engine.Engine, p P) (R, error)) handler {
+func handle[P any, R any](interactive bool, fn func(ctx context.Context, e *engine.Engine, p P) (R, error)) handler {
 	return func(ctx context.Context, s *server, raw json.RawMessage) (any, error) {
 		p, err := decode[P](raw)
 		if err != nil {
@@ -62,8 +62,20 @@ func method[P any, R any](fn func(ctx context.Context, e *engine.Engine, p P) (R
 		if e == nil {
 			return nil, errors.New("the engine is not configured yet; call configure first")
 		}
+		if interactive {
+			e.Begin()
+			defer e.End()
+		}
 		return fn(ctx, e, p)
 	}
+}
+
+func method[P any, R any](fn func(ctx context.Context, e *engine.Engine, p P) (R, error)) handler {
+	return handle(true, fn)
+}
+
+func hint[P any, R any](fn func(ctx context.Context, e *engine.Engine, p P) (R, error)) handler {
+	return handle(false, fn)
 }
 
 type none struct{}
@@ -104,15 +116,16 @@ var handlers = map[string]handler{
 		Offset int    `json:"offset"`
 		Limit  int    `json:"limit"`
 		Count  bool   `json:"count"`
+		Known  string `json:"known"`
 	}) (engine.ThreadPage, error) {
-		return e.Threads(p.Query, notmuch.NewestFirst, p.Offset, p.Limit, p.Count)
+		return e.Threads(p.Query, notmuch.NewestFirst, p.Offset, p.Limit, p.Count, p.Known)
 	}),
 	"count_threads": method(func(_ context.Context, e *engine.Engine, p struct {
 		Query string `json:"query"`
 	}) (int, error) {
 		return e.CountThreads(p.Query)
 	}),
-	"prefetch": method(func(_ context.Context, e *engine.Engine, p struct {
+	"prefetch": hint(func(_ context.Context, e *engine.Engine, p struct {
 		Queries []string `json:"queries"`
 		Limit   int      `json:"limit"`
 	}) (bool, error) {
@@ -138,7 +151,7 @@ var handlers = map[string]handler{
 	}) ([]engine.MessageView, error) {
 		return e.Thread(p.ID, p.Render)
 	}),
-	"warm": method(func(_ context.Context, e *engine.Engine, p struct {
+	"warm": hint(func(_ context.Context, e *engine.Engine, p struct {
 		IDs    []string       `json:"ids"`
 		Render *engine.Render `json:"render"`
 	}) (bool, error) {
