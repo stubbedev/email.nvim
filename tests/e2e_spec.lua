@@ -1,4 +1,20 @@
 ---@diagnostic disable: duplicate-set-field
+vim.g.mapleader = " "
+local placed = {}
+package.preload["image"] = function()
+  return {
+    from_file = function(path, opts)
+      local image = { path = path, opts = opts, cleared = false }
+      function image.render(self)
+        placed[#placed + 1] = self
+      end
+      function image.clear(self)
+        self.cleared = true
+      end
+      return image
+    end,
+  }
+end
 local root = vim.fn.tempname()
 local mail = root .. "/mail"
 for _, folder in ipairs({ "INBOX", "Sent", "Drafts", "Archive" }) do
@@ -91,9 +107,10 @@ require("email").setup({
   },
   renderers = {
     ["text/html"] = function(html)
-      return (html:gsub("<[^>]+>", ""))
+      return (html:gsub('<img src="([^"]+)" alt="([^"]*)">', "![%2](%1)"):gsub("<[^>]+>", ""))
     end,
   },
+  images = { enabled = true },
   send_cmd = { "sh", "-c", 'cat > "$0"', sent_path },
   refresh_interval = 0,
 })
@@ -142,13 +159,18 @@ describe("e2e: the reader shows an invite row for calendar invitations", functio
   local text = table.concat(vim.api.nvim_buf_get_lines(state.buf.reader, 0, -1, false), "\n")
   eq(
     true,
-    text:find("Invite:   " .. state.config.icons.invite .. " Team sync  (gy accept · gn decline · gm maybe)", 1, true)
-      ~= nil
+    text:find(
+      "Invite:   "
+        .. state.config.icons.invite
+        .. " Team sync  (<Space>my accept · <Space>mn decline · <Space>mt maybe)",
+      1,
+      true
+    ) ~= nil
   )
 end)
 
 describe("e2e: accepting sends an iCalendar REPLY to the organizer", function()
-  keys("gy")
+  keys("<leader>my")
   wait("composer", function()
     return vim.bo.filetype == "mail"
   end)
@@ -162,7 +184,7 @@ describe("e2e: accepting sends an iCalendar REPLY to the organizer", function()
     "",
     "Test User has accepted the invitation.",
   }, vim.api.nvim_buf_get_lines(buf, 0, -1, false))
-  keys("<C-s>")
+  keys("<leader>ms")
   wait("send", function()
     return not vim.api.nvim_buf_is_valid(buf)
   end)
@@ -204,7 +226,7 @@ describe("e2e: recipient headers complete addresses from the notmuch index", fun
   wait("draft", function()
     return #files("Drafts") == 1
   end)
-  keys("<C-s>")
+  keys("<leader>ms")
   wait("send", function()
     return not vim.api.nvim_buf_is_valid(buf)
   end)
@@ -216,8 +238,8 @@ end)
 
 describe("e2e: marked messages are archived together", function()
   focus_row(3)
-  keys("v")
-  keys("v")
+  keys("<Tab>")
+  keys("<Tab>")
   eq(2, vim.tbl_count(state.marked))
   keys("a")
   wait("archive", function()
@@ -240,5 +262,77 @@ describe("e2e: a visual selection is deleted in one go", function()
   end)
   vim.fn.confirm = confirm
   eq(0, #files("INBOX"))
+  eq({}, errors)
+end)
+
+describe("e2e: inline cid and data images and attached photos are placed in the reader", function()
+  local png = vim.base64.encode("\137PNG\r\n\26\n")
+  write(
+    mail .. "/acct/INBOX/new/1005.x,U=5",
+    table.concat({
+      "From: Sender <s@example.org>",
+      "To: me@example.com",
+      "Subject: Pictures",
+      "Message-ID: <pic@example.org>",
+      "Date: Thu, 19 Nov 2026 10:05:00 +0000",
+      'Content-Type: multipart/mixed; boundary="m"',
+      "",
+      "--m",
+      'Content-Type: multipart/related; boundary="r"',
+      "",
+      "--r",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      '<p>Logo</p><img src="cid:logo@x" alt="Logo"><p>Inline</p><img src="data:image/png;base64,' .. png .. '" alt="">',
+      "--r",
+      "Content-Type: image/png",
+      "Content-ID: <logo@x>",
+      "Content-Disposition: inline",
+      "Content-Transfer-Encoding: base64",
+      "",
+      png,
+      "--r--",
+      "--m",
+      "Content-Type: image/jpeg",
+      'Content-Disposition: attachment; filename="photo.jpg"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      vim.base64.encode("JPEGDATA"),
+      "--m--",
+      "",
+    }, "\n")
+  )
+  assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
+  vim.cmd("Email")
+  wait("picture message", function()
+    return #state.messages == 1
+  end)
+  focus_row(1)
+  keys("<CR>")
+  wait("three images", function()
+    return #placed == 3
+  end)
+  local lines = vim.api.nvim_buf_get_lines(state.buf.reader, 0, -1, false)
+  local function row_of(anchor)
+    for i, line in ipairs(lines) do
+      if line:find(anchor, 1, true) then
+        return i - 1
+      end
+    end
+  end
+  for _, image in ipairs(placed) do
+    eq(state.win.reader, image.opts.window)
+  end
+  eq({ row_of("#image-1"), row_of("#image-1") + 1, row_of("#image-3") }, {
+    placed[1].opts.y,
+    placed[2].opts.y,
+    placed[3].opts.y,
+  })
+  eq(true, placed[1].path:match("%.png$") ~= nil)
+  eq("\137PNG\r\n\26\n", assert(io.open(placed[2].path, "rb")):read("*a"))
+  eq(true, placed[3].path:match("%.jpg$") ~= nil)
+  eq(nil, table.concat(lines, "\n"):find("base64", 1, true))
+  keys("q")
+  eq(true, placed[1].cleared and placed[2].cleared and placed[3].cleared)
   eq({}, errors)
 end)

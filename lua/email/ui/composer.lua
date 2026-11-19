@@ -1,5 +1,6 @@
 local addresses = require("email.addresses")
 local async = require("email.async")
+local format = require("email.format")
 
 local M = {}
 
@@ -81,8 +82,8 @@ function M.open(draft, handlers, keymaps, border)
     title_pos = "center",
     footer = (" %s%s send · :w save draft · %s discard "):format(
       draft.calendar and ("calendar reply: " .. draft.calendar.label .. " · ") or "",
-      keymaps.send or "-",
-      keymaps.discard or "-"
+      keymaps.send and format.keys(keymaps.send) or "-",
+      keymaps.discard and format.keys(keymaps.discard) or "-"
     ),
     footer_pos = "center",
     zindex = 60,
@@ -128,7 +129,7 @@ function M.open(draft, handlers, keymaps, border)
   for action, lhs in pairs(keymaps) do
     if lhs then
       for _, key in ipairs(type(lhs) == "table" and lhs or { lhs }) do
-        vim.keymap.set({ "n", "i" }, key, actions[action], { buffer = buf, desc = "email: " .. action })
+        vim.keymap.set("n", key, actions[action], { buffer = buf, desc = "email: " .. action })
       end
     end
   end

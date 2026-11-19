@@ -58,14 +58,24 @@ end
 
 local CALENDAR_TYPES = { ["text/calendar"] = true, ["application/ics"] = true }
 
-local function collect_calendars(part, out)
-  if CALENDAR_TYPES[content_type(part)] then
-    out[#out + 1] = type(part.content) == "string" and { content = part.content } or { part = part.id }
+local function collect(part, calendars, images)
+  local ctype = content_type(part)
+  if CALENDAR_TYPES[ctype] then
+    calendars[#calendars + 1] = type(part.content) == "string" and { content = part.content } or { part = part.id }
+  elseif ctype:sub(1, 6) == "image/" then
+    local disposition = part["content-disposition"]
+    images[#images + 1] = {
+      part = part.id,
+      content_type = ctype,
+      content_id = part["content-id"] and (part["content-id"]:gsub("^<(.*)>$", "%1")),
+      filename = part.filename,
+      attachment = disposition == "attachment" or (part.filename ~= nil and disposition ~= "inline"),
+    }
   end
   if type(part.content) == "table" then
     for _, child in ipairs(part.content) do
       if child["content-type"] then
-        collect_calendars(child, out)
+        collect(child, calendars, images)
       end
     end
   end
@@ -91,10 +101,10 @@ end
 
 function M.message(raw, preference)
   local message = M.summary(raw)
-  message.blocks, message.attachments, message.calendars = {}, {}, {}
+  message.blocks, message.attachments, message.calendars, message.images = {}, {}, {}, {}
   for _, part in ipairs(raw.body or {}) do
     walk(part, preference, message.blocks, message.attachments)
-    collect_calendars(part, message.calendars)
+    collect(part, message.calendars, message.images)
   end
   return message
 end

@@ -138,6 +138,18 @@ function M.file_icon(filename, config)
   return icon, hl
 end
 
+function M.key(lhs)
+  return vim.fn.keytrans(vim.keycode(lhs))
+end
+
+function M.keys(lhs)
+  local out = {}
+  for i, key in ipairs(type(lhs) == "table" and lhs or { lhs }) do
+    out[i] = M.key(key)
+  end
+  return table.concat(out, " ")
+end
+
 function M.size(bytes)
   if not bytes then
     return "?"

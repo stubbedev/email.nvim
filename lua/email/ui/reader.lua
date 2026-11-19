@@ -9,16 +9,12 @@ local HEADERS = { "From", "To", "Cc", "Subject" }
 local LABEL_WIDTH = 9
 local INVITE_ACTIONS = { { "accept", "accept" }, { "decline", "decline" }, { "tentative", "maybe" } }
 
-local function first_key(lhs)
-  return type(lhs) == "table" and lhs[1] or lhs
-end
-
 local function invite_hint(keymaps)
   local hints = {}
   for _, action in ipairs(INVITE_ACTIONS) do
-    local key = first_key(keymaps[action[1]])
-    if key then
-      hints[#hints + 1] = key .. " " .. action[2]
+    local lhs = keymaps[action[1]]
+    if lhs then
+      hints[#hints + 1] = format.key(type(lhs) == "table" and lhs[1] or lhs) .. " " .. action[2]
     end
   end
   return table.concat(hints, " · ")
@@ -81,7 +77,7 @@ function M.show(message, body, invite)
   vim.api.nvim_win_set_cursor(state.win.reader, { 1, 0 })
   local subject = format.oneline(message.headers.Subject)
   layout.set_title("reader", subject ~= "" and vim.trim(format.fit(subject, width - 4)) or "Email")
-  return buf
+  return buf, #lines - #body
 end
 
 return M

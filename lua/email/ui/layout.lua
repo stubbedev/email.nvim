@@ -1,3 +1,4 @@
+local images = require("email.images")
 local state = require("email.state")
 
 local M = {}
@@ -97,6 +98,7 @@ function M.close()
     return
   end
   state.closing = true
+  images.clear()
   for _, name in ipairs({ "reader", "list", "sidebar" }) do
     if valid(state.win[name]) then
       vim.api.nvim_win_close(state.win[name], true)
@@ -148,6 +150,7 @@ function M.open_reader()
 end
 
 function M.close_reader()
+  images.clear()
   if valid(state.win.reader) then
     state.closing = true
     vim.api.nvim_win_close(state.win.reader, true)

@@ -15,6 +15,12 @@ M.defaults = {
   sidebar_width = 30,
   list_ratio = 0.4,
   devicons = false,
+  images = {
+    enabled = false,
+    remote = false,
+    max_width = 80,
+    max_height = 40,
+  },
   icons = {
     unread = "●",
     flagged = "\u{f04ce}",
@@ -36,44 +42,45 @@ M.defaults = {
   },
   keymaps = {
     global = {
-      help = "g?",
+      help = { "g?", "?" },
       compose = "c",
       reply = "r",
-      reply_all = "R",
+      reply_all = "gr",
       forward = "f",
       edit = "e",
       archive = "a",
       delete = "d",
       move = "m",
       toggle_unread = "u",
-      toggle_flagged = "s",
-      attachments = "ga",
-      pipe = "|",
-      search = "/",
-      sync = "gs",
-      next_folder = { "<Tab>", "]f" },
-      prev_folder = { "<S-Tab>", "[f" },
-      pick_folder = "gF",
-      accept = "gy",
-      decline = "gn",
-      tentative = "gm",
+      toggle_flagged = "*",
+      sync = "R",
+      next_folder = { "<S-l>", "]b" },
+      prev_folder = { "<S-h>", "[b" },
+      search = "<leader>/",
+      attachments = "<leader>ma",
+      pipe = "<leader>mp",
+      pick_folder = "<leader>mf",
+      accept = "<leader>my",
+      decline = "<leader>mn",
+      tentative = "<leader>mt",
     },
     list = {
       open = "<CR>",
       quit = "q",
       next_page = "]]",
       prev_page = "[[",
-      focus_sidebar = "<C-h>",
-      focus_reader = "<C-j>",
-      mark = "v",
+      mark = "<Tab>",
       mark_all = "<C-a>",
       unmark_all = "<Esc>",
+      focus_sidebar = "<C-h>",
+      focus_reader = "<C-j>",
     },
     reader = {
       close_reader = "q",
-      next_message = "J",
-      prev_message = "K",
+      next_message = "]]",
+      prev_message = "[[",
       focus_list = "<C-k>",
+      focus_sidebar = "<C-h>",
     },
     sidebar = {
       select_folder = "<CR>",
@@ -81,8 +88,8 @@ M.defaults = {
       focus_list = "<C-l>",
     },
     composer = {
-      send = "<C-s>",
-      discard = "<C-q>",
+      send = "<leader>ms",
+      discard = "<leader>md",
     },
   },
 }
@@ -148,6 +155,14 @@ function M.resolve(opts, actions)
   vim.validate("folder_icons", config.folder_icons, "table")
   if config.devicons then
     require("nvim-web-devicons")
+  end
+  vim.validate("images", config.images, "table")
+  vim.validate("images.enabled", config.images.enabled, "boolean")
+  vim.validate("images.remote", config.images.remote, "boolean")
+  vim.validate("images.max_width", config.images.max_width, "number")
+  vim.validate("images.max_height", config.images.max_height, "number")
+  if config.images.enabled then
+    require("image")
   end
   validate_keymaps(config.keymaps, actions)
   config.downloads_dir = vim.fs.normalize(config.downloads_dir)

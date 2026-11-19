@@ -3,6 +3,7 @@ local compose = require("email.compose")
 local composer = require("email.ui.composer")
 local format = require("email.format")
 local help = require("email.ui.help")
+local images = require("email.images")
 local ical = require("email.ical")
 local layout = require("email.ui.layout")
 local list = require("email.ui.list")
@@ -201,11 +202,17 @@ local function invite_of(message)
 end
 
 local function show(summary)
+  local pending
   layout.with_busy("Opening", function()
     local message = parse.message(notmuch.show(summary.id), state.config.alternatives)
     local body = render.body(message, state.config.renderers)
+    local references = {}
+    if state.config.images.enabled then
+      body, references = images.extract(body)
+      images.append_attachments(message, body, references)
+    end
     state.current = message
-    local buf = reader.show(message, body, invite_of(message))
+    local buf, first_row = reader.show(message, body, invite_of(message))
     if not vim.b[buf].email_bound then
       M.bind(buf, { "global", "reader" })
       vim.b[buf].email_bound = true
@@ -213,8 +220,12 @@ local function show(summary)
     if message.tags.unread then
       update_tags({ message.id }, { "-unread" })
     end
+    pending = { message = message, references = references, buf = buf, first_row = first_row }
   end)
   layout.focus("reader")
+  if pending and #pending.references > 0 then
+    images.show(pending.message, pending.references, pending.buf, state.win.reader, pending.first_row)
+  end
 end
 
 local function set_folder(folder)

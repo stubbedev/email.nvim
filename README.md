@@ -21,6 +21,9 @@ listing, searching and opening mail is instant on a local Maildir kept in sync b
   select rows in visual mode.
 - **Address completion** in `To`, `Cc`, `Bcc` and `Reply-To`, ranked from the notmuch index (people you have written to
   first): built in as `omnifunc` (`<C-x><C-o>`) and as a [blink.cmp](https://github.com/saghen/blink.cmp) source.
+- **Inline images** through [image.nvim](https://github.com/3rd/image.nvim): `cid:` parts, base64 `data:` images and
+  attached photos are drawn where the renderer put their `![alt](src)` (for example `html-to-md --html --images`),
+  attached ones after the body. Remote images stay off unless you opt in.
 - Optional [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) file icons for attachments, and Nerd
   Font icons for folders and flags.
 - Saves and opens attachments, pipes a message into a shell command (unsubscribe scripts, patch tools), and refreshes
@@ -89,6 +92,7 @@ The source only answers inside email.nvim's composer, on recipient headers.
 | `refresh_interval` | `5000` | ms between checks of the notmuch database for changes; `0` disables |
 | `downloads_dir` | `~/Downloads` | Where saved attachments go |
 | `border`, `width`, `height`, `sidebar_width`, `list_ratio` | `"rounded"`, `0.9`, `0.9`, `30`, `0.4` | Layout |
+| `images` | `{ enabled = false, remote = false, max_width = 80, max_height = 40 }` | Inline images through [image.nvim](https://github.com/3rd/image.nvim) (must be installed and set up when enabled); sizes are percentages of the message window; `remote` fetches `http(s)` images, off by default because remote images are how senders track opens |
 | `devicons` | `false` | File icons for attachments from nvim-web-devicons (must be installed when `true`) |
 | `icons` | Nerd Font glyphs | `unread`, `flagged`, `replied`, `attachment`, `marked`, `invite` |
 | `folder_icons` | Nerd Font glyphs | `account`, `inbox`, `sent`, `drafts`, `archive`, `junk`, `trash`, `folder`, `search`; a folder's role comes from its name |
@@ -96,22 +100,28 @@ The source only answers inside email.nvim's composer, on recipient headers.
 
 ## Keys
 
-Press `g?` inside the client for the live list.
+The defaults follow LazyVim habits: nothing shadows flash (`s`/`S`), mini.surround (`gs`) or `<C-s>` (save, which in
+the composer saves a draft); `<S-h>`/`<S-l>` and `[b`/`]b` move between folders the way they move between buffers;
+`R` refreshes as in lazy.nvim and neo-tree; `<Tab>`/`<C-a>` select like a picker; `<C-h/j/k/l>` move between panes;
+and the rarer actions live under `<leader>m`, so which-key lists them. Press `g?` or `?` for the live list.
 
 | Context | Key | Action |
 | --- | --- | --- |
-| everywhere | `c` `r` `R` `f` `e` | compose, reply, reply all, forward, edit draft |
-| | `a` `d` `m` | archive, delete, move |
-| | `u` `s` | toggle unread, toggle flagged |
-| | `ga` `\|` | open or save attachment, pipe message to a command |
-| | `/` `gs` | notmuch search, sync |
-| | `gy` `gn` `gm` | accept, decline, tentatively accept an invite |
-| | `<Tab>` `<S-Tab>` `gF` | next, previous, pick folder |
+| list and message | `c` `r` `gr` `f` `e` | compose, reply, reply all, forward, edit draft |
+| | `a` `d` `m` | archive, delete, move (also on marked messages or a visual selection) |
+| | `u` `*` | toggle unread, toggle flagged |
+| | `R` | sync (`sync_cmd`) |
+| | `<S-l>` `]b` / `<S-h>` `[b` | next / previous folder |
+| | `<leader>/` | notmuch search |
+| | `<leader>ma` `<leader>mp` `<leader>mf` | attachments, pipe to a command, pick folder |
+| | `<leader>my` `<leader>mn` `<leader>mt` | accept, decline, tentatively accept an invite |
 | list | `<CR>` `q` `]]` `[[` | open, quit, next and previous page |
-| | `v` `<C-a>` `<Esc>` | toggle mark (or mark the visual selection), mark all on the page, clear marks |
-| message | `q` `J` `K` | close, next and previous message |
-| folders | `<CR>` | open folder |
-| composer | `<C-s>` `<C-q>` `:w` | send, discard, save draft |
+| | `<Tab>` `<C-a>` `<Esc>` | toggle mark (or the visual selection), mark the page, clear marks |
+| | `<C-h>` `<C-j>` | focus folders, focus message |
+| message | `q` `]]` `[[` | close, next and previous message |
+| | `<C-k>` `<C-h>` | focus list, focus folders |
+| folders | `<CR>` `q` `<C-l>` | open folder, quit, focus list |
+| composer | `<leader>ms` `<leader>md` `:w` | send, discard, save draft |
 
 ## Highlights
 

@@ -1,10 +1,8 @@
+local format = require("email.format")
+
 local M = {}
 
 local CONTEXTS = { "list", "reader", "sidebar", "global", "composer" }
-
-local function keys(lhs)
-  return type(lhs) == "table" and table.concat(lhs, " ") or lhs
-end
 
 function M.lines(keymaps, descriptions)
   local lines = {}
@@ -12,7 +10,7 @@ function M.lines(keymaps, descriptions)
     local rows = {}
     for action, lhs in pairs(keymaps[context] or {}) do
       if lhs then
-        rows[#rows + 1] = { keys(lhs), descriptions[action] }
+        rows[#rows + 1] = { format.keys(lhs), descriptions[action] }
       end
     end
     table.sort(rows, function(a, b)
@@ -24,7 +22,7 @@ function M.lines(keymaps, descriptions)
       end
       lines[#lines + 1] = " " .. context:sub(1, 1):upper() .. context:sub(2)
       for _, row in ipairs(rows) do
-        lines[#lines + 1] = ("   %-14s %s"):format(row[1], row[2])
+        lines[#lines + 1] = ("   %-18s %s"):format(row[1], row[2])
       end
     end
   end
