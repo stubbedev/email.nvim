@@ -18,18 +18,13 @@ local function title()
     .. folder.name
 end
 
-local function footer(width)
+local function status()
   local pages = math.max(1, math.ceil(state.total / state.config.page_size))
   local left = (" Page %d/%d "):format(state.page, pages)
   local marked = vim.tbl_count(state.marked)
   local right = marked > 0 and (" %d marked · %d messages "):format(marked, state.total)
     or (" %d messages "):format(state.total)
-  local fill = math.max(0, width - vim.fn.strdisplaywidth(left) - vim.fn.strdisplaywidth(right))
-  return {
-    { left, "FloatFooter" },
-    { string.rep("─", fill), "FloatBorder" },
-    { right, "FloatFooter" },
-  }
+  return left, right
 end
 
 function M.render(keep_id)
@@ -60,7 +55,7 @@ function M.render(keep_id)
   end
   vim.api.nvim_win_set_cursor(win, { math.min(cursor, #lines), 0 })
   layout.set_title("list", title())
-  layout.set_footer("list", footer(width), "left")
+  layout.set_status("list", status())
 end
 
 function M.selected()

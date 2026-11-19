@@ -408,3 +408,46 @@ describe("e2e: attached photos are not drawn once the attachment list collapses"
   eq(5, #state.current.attachments)
   keys("q")
 end)
+
+describe("e2e: the full layout uses normal windows in a tab of its own", function()
+  require("email.ui.layout").close()
+  state.config.layout = "full"
+  local origin_tab, origin_win = vim.api.nvim_get_current_tabpage(), vim.api.nvim_get_current_win()
+  vim.cmd("EmailSearch id:many@example.org")
+  wait("the full layout to load the search", function()
+    local win = state.win.list
+    return win ~= nil
+      and vim.api.nvim_win_is_valid(win)
+      and state.busy == 0
+      and vim.wo[win].winbar:find("id:many@example.org", 1, true) ~= nil
+  end)
+  local list_tab = vim.api.nvim_win_get_tabpage(state.win.list)
+  eq(false, list_tab == origin_tab)
+  eq("", vim.api.nvim_win_get_config(state.win.list).relative)
+  eq("", vim.api.nvim_win_get_config(state.win.sidebar).relative)
+  eq(list_tab, vim.api.nvim_win_get_tabpage(state.win.sidebar))
+  eq(state.config.sidebar_width, vim.api.nvim_win_get_width(state.win.sidebar))
+  eq(true, vim.wo[state.win.list].winbar:find("1 messages", 1, true) ~= nil)
+  eq(false, vim.wo[state.win.list].number)
+
+  focus_row(1)
+  keys("<CR>")
+  wait("reader", function()
+    return state.current ~= nil and state.busy == 0
+  end)
+  local reader_tab = vim.api.nvim_win_get_tabpage(state.win.reader)
+  eq(false, reader_tab == list_tab)
+  eq("", vim.api.nvim_win_get_config(state.win.reader).relative)
+  eq(true, vim.wo[state.win.reader].winbar:find("Many uploads", 1, true) ~= nil)
+  eq(true, vim.wo[state.win.reader].winbar:find("q back", 1, true) ~= nil)
+
+  keys("q")
+  eq(false, vim.api.nvim_tabpage_is_valid(reader_tab))
+  eq(state.win.list, vim.api.nvim_get_current_win())
+
+  keys("q")
+  eq(false, vim.api.nvim_tabpage_is_valid(list_tab))
+  eq(true, vim.api.nvim_win_is_valid(origin_win))
+  eq({}, errors)
+  state.config.layout = "float"
+end)

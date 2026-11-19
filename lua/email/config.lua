@@ -9,6 +9,7 @@ M.defaults = {
   page_size = 100,
   refresh_interval = 5000,
   downloads_dir = "~/Downloads",
+  layout = "float",
   border = "rounded",
   width = 0.9,
   height = 0.9,
@@ -156,6 +157,9 @@ function M.resolve(opts, actions)
   vim.validate("sync_cmd", config.sync_cmd, "table", true)
   vim.validate("page_size", config.page_size, "number")
   vim.validate("refresh_interval", config.refresh_interval, "number")
+  if config.layout ~= "float" and config.layout ~= "full" then
+    error(('layout must be "float" or "full", got %s'):format(vim.inspect(config.layout)), 0)
+  end
   vim.validate("devicons", config.devicons, "boolean")
   vim.validate("icons", config.icons, "table")
   vim.validate("folder_icons", config.folder_icons, "table")

@@ -4,9 +4,24 @@ local state = require("email.state")
 local M = {}
 
 local SPINNER = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+local PLAIN_WINDOW = {
+  number = false,
+  relativenumber = false,
+  signcolumn = "no",
+  foldcolumn = "0",
+  statuscolumn = "",
+  colorcolumn = "",
+  spell = false,
+  list = false,
+}
 
 local group = vim.api.nvim_create_augroup("email.nvim.layout", { clear = true })
 local spinner_timer, spinner_frame, spinner_label
+local bars = {}
+
+local function full()
+  return state.config.layout == "full"
+end
 
 local function geometry()
   local cfg = state.config
@@ -40,22 +55,55 @@ end
 
 local function scratch(filetype)
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].filetype = filetype
   vim.bo[buf].modifiable = false
   return buf
 end
 
-local function open_window(name, buf, enter, g, title)
+local function escape(text)
+  return (text:gsub("%%", "%%%%"))
+end
+
+local function render_bar(name)
+  local win, bar = state.win[name], bars[name]
+  if not valid(win) or not bar then
+    return
+  end
+  local title = bar.title and ("%#EmailWinbarTitle# " .. escape(bar.title) .. " ") or ""
+  local status = table.concat(
+    vim.tbl_filter(function(part)
+      return part ~= nil and part ~= ""
+    end, { bar.left, bar.right }),
+    "  "
+  )
+  vim.wo[win].winbar = title .. "%#WinBar#%=" .. escape(status) .. " "
+end
+
+local function float_window(buf, enter, g, title)
   local config = win_config(g)
   config.border = state.config.border
   config.style = "minimal"
   config.title = " " .. title .. " "
   config.title_pos = "center"
   config.zindex = 45
-  local win = vim.api.nvim_open_win(buf, enter, config)
+  return vim.api.nvim_open_win(buf, enter, config)
+end
+
+local function plain(win)
+  for option, value in pairs(PLAIN_WINDOW) do
+    vim.wo[win][option] = value
+  end
+end
+
+local function register(name, win, buf, title)
   state.win[name] = win
   state.buf[name] = buf
+  if full() then
+    bars[name] = { title = title }
+    plain(win)
+    render_bar(name)
+  end
   return win
 end
 
@@ -68,6 +116,9 @@ local function set_hidden(hidden)
 end
 
 function M.reader_width()
+  if full() then
+    return vim.o.columns
+  end
   return geometry().reader.width
 end
 
@@ -76,19 +127,43 @@ function M.is_open()
 end
 
 function M.set_title(name, title)
-  if valid(state.win[name]) then
-    vim.api.nvim_win_set_config(state.win[name], { title = " " .. title .. " ", title_pos = "center" })
+  if not valid(state.win[name]) then
+    return
   end
+  if full() then
+    bars[name] = bars[name] or {}
+    bars[name].title = title
+    render_bar(name)
+    return
+  end
+  vim.api.nvim_win_set_config(state.win[name], { title = " " .. title .. " ", title_pos = "center" })
 end
 
-function M.set_footer(name, footer, pos)
-  if valid(state.win[name]) then
-    vim.api.nvim_win_set_config(state.win[name], { footer = footer, footer_pos = pos or "center" })
+function M.set_status(name, left, right)
+  local win = state.win[name]
+  if not valid(win) then
+    return
   end
+  if full() then
+    bars[name] = bars[name] or {}
+    bars[name].left, bars[name].right = left, right
+    render_bar(name)
+    return
+  end
+  if left and right then
+    local width = vim.api.nvim_win_get_width(win)
+    local fill = math.max(0, width - vim.fn.strdisplaywidth(left) - vim.fn.strdisplaywidth(right))
+    vim.api.nvim_win_set_config(win, {
+      footer = { { left, "FloatFooter" }, { string.rep("─", fill), "FloatBorder" }, { right, "FloatFooter" } },
+      footer_pos = "left",
+    })
+    return
+  end
+  vim.api.nvim_win_set_config(win, { footer = left or right or "", footer_pos = "center" })
 end
 
 function M.resize()
-  if not M.is_open() then
+  if not M.is_open() or full() then
     return
   end
   local g = geometry()
@@ -99,30 +174,46 @@ function M.resize()
   end
 end
 
+local function close_window(win)
+  if not valid(win) then
+    return
+  end
+  local tab = vim.api.nvim_win_get_tabpage(win)
+  local last_tab = #vim.api.nvim_list_tabpages() == 1
+  local last_in_tab = #vim.api.nvim_tabpage_list_wins(tab) == 1
+  if full() and last_tab and last_in_tab then
+    vim.api.nvim_win_set_buf(win, vim.api.nvim_create_buf(true, false))
+    vim.wo[win].winbar = ""
+    return
+  end
+  vim.api.nvim_win_close(win, true)
+end
+
+local function wipe(buf)
+  if buf and vim.api.nvim_buf_is_valid(buf) then
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+end
+
 function M.close()
   if state.closing then
     return
   end
   state.closing = true
   images.clear()
-  for _, name in ipairs({ "reader", "list", "sidebar" }) do
-    if valid(state.win[name]) then
-      vim.api.nvim_win_close(state.win[name], true)
-    end
+  for _, name in ipairs({ "reader", "sidebar", "list" }) do
+    close_window(state.win[name])
+  end
+  for _, name in ipairs({ "reader", "sidebar", "list" }) do
+    wipe(state.buf[name])
   end
   state.win, state.buf, state.reading, state.current = {}, {}, false, nil
+  bars = {}
   vim.api.nvim_clear_autocmds({ group = group })
   state.closing = false
 end
 
-function M.open()
-  local g = geometry()
-  open_window("sidebar", scratch("email-sidebar"), false, g.sidebar, "Folders")
-  open_window("list", scratch("email-list"), true, g.list, "Emails")
-  for _, name in ipairs({ "sidebar", "list" }) do
-    vim.wo[state.win[name]].cursorline = true
-    vim.wo[state.win[name]].wrap = false
-  end
+local function watch()
   vim.api.nvim_create_autocmd("WinClosed", {
     group = group,
     callback = function(args)
@@ -140,29 +231,71 @@ function M.open()
   vim.api.nvim_create_autocmd("VimResized", { group = group, callback = M.resize })
 end
 
+function M.open()
+  local sidebar, list = scratch("email-sidebar"), scratch("email-list")
+  if full() then
+    vim.cmd.tabnew()
+    local win, placeholder = vim.api.nvim_get_current_win(), vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(win, list)
+    wipe(placeholder)
+    register("list", win, list, "Emails")
+    local side =
+      vim.api.nvim_open_win(sidebar, false, { split = "left", win = win, width = state.config.sidebar_width })
+    register("sidebar", side, sidebar, "Folders")
+    vim.wo[side].winfixwidth = true
+  else
+    local g = geometry()
+    register("sidebar", float_window(sidebar, false, g.sidebar, "Folders"), sidebar)
+    register("list", float_window(list, true, g.list, "Emails"), list)
+  end
+  for _, name in ipairs({ "sidebar", "list" }) do
+    vim.wo[state.win[name]].cursorline = true
+    vim.wo[state.win[name]].wrap = false
+  end
+  watch()
+end
+
 function M.open_reader()
   if valid(state.win.reader) then
     return state.buf.reader
   end
   state.reading = true
-  local win = open_window("reader", scratch("email-message"), true, geometry().reader, "Email")
+  local buf = scratch("email-message")
+  local win
+  if full() then
+    vim.cmd.tabnew()
+    win = vim.api.nvim_get_current_win()
+    local placeholder = vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(win, buf)
+    wipe(placeholder)
+  else
+    win = float_window(buf, true, geometry().reader, "Email")
+  end
+  register("reader", win, buf, "Email")
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
   vim.wo[win].breakindent = true
-  set_hidden(true)
-  return state.buf.reader
+  if not full() then
+    set_hidden(true)
+  end
+  return buf
 end
 
 function M.close_reader()
   images.clear()
+  local buf = state.buf.reader
   if valid(state.win.reader) then
     state.closing = true
-    vim.api.nvim_win_close(state.win.reader, true)
+    close_window(state.win.reader)
     state.closing = false
   end
+  wipe(buf)
+  bars.reader = nil
   state.win.reader, state.buf.reader, state.reading, state.current = nil, nil, false, nil
-  set_hidden(false)
-  M.resize()
+  if not full() then
+    set_hidden(false)
+    M.resize()
+  end
   M.focus("list")
 end
 
@@ -178,7 +311,7 @@ end
 
 local function draw_spinner()
   spinner_frame = spinner_frame % #SPINNER + 1
-  M.set_footer(status_window(), " " .. SPINNER[spinner_frame] .. " " .. spinner_label .. " ")
+  M.set_status(status_window(), nil, " " .. SPINNER[spinner_frame] .. " " .. spinner_label .. " ")
 end
 
 function M.busy(label)
@@ -201,9 +334,9 @@ function M.idle()
   spinner_timer:stop()
   spinner_timer:close()
   spinner_timer = nil
-  M.set_footer("sidebar", "")
+  M.set_status("sidebar", nil, nil)
   if state.reading then
-    M.set_footer("reader", state.reader_footer or "", "center")
+    M.set_status("reader", nil, state.reader_footer)
   end
 end
 

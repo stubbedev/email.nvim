@@ -124,7 +124,7 @@ function M.show(message, doc, invite)
   local subject = format.oneline(message.headers.Subject)
   layout.set_title("reader", subject ~= "" and vim.trim(format.fit(subject, width - 4)) or "Email")
   state.reader_footer = footer(message, state.config.keymaps.reader)
-  layout.set_footer("reader", state.reader_footer, "center")
+  layout.set_status("reader", nil, state.reader_footer)
   return buf, first_row
 end
 

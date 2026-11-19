@@ -33,6 +33,7 @@ local GROUPS = {
   EmailRule = { link = "FloatBorder" },
   EmailTableBorder = { link = "FloatBorder" },
   EmailTableHeader = { bold = true },
+  EmailWinbarTitle = { link = "Title" },
 }
 
 local HEADING_BLEND = 0.2
