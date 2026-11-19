@@ -87,6 +87,8 @@ M.defaults = {
       close_reader = "q",
       next_message = "]]",
       prev_message = "[[",
+      next_in_thread = "]m",
+      prev_in_thread = "[m",
       open_link = "gx",
       click_link = "<LeftMouse>",
     },

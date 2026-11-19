@@ -37,14 +37,16 @@ M.descriptions = {
   next_folder = "Next folder",
   prev_folder = "Previous folder",
   pick_folder = "Pick folder",
-  open = "Open message",
+  open = "Open conversation",
   quit = "Quit",
   focus_sidebar = "Focus folders",
   close_reader = "Back to the list",
   open_link = "Open link under cursor",
   click_link = "Open the clicked link",
-  next_message = "Next message",
-  prev_message = "Previous message",
+  next_message = "Next conversation",
+  prev_message = "Previous conversation",
+  next_in_thread = "Next message in the conversation",
+  prev_in_thread = "Previous message in the conversation",
   focus_list = "Focus list",
   select_folder = "Open folder",
   accept = "Accept invite",
@@ -85,36 +87,36 @@ function M.load_list(keep_id)
   state.load_generation = state.load_generation + 1
   local generation = state.load_generation
   local q = query()
-  local total = notmuch.count(q)
-  local raws = notmuch.page(q, math.max(state.config.page_size, #state.messages), 0)
+  local total = notmuch.count_threads(q)
+  local raws = notmuch.threads(q, math.max(state.config.page_size, #state.threads), 0)
   if generation ~= state.load_generation or not layout.is_open() then
     return
   end
   state.total = total
-  state.messages = vim.tbl_map(parse.summary, raws)
+  state.threads = vim.tbl_map(parse.thread, raws)
   list.render(keep_id)
 end
 
 local SCROLL_AHEAD = 20
 
 function M.load_more()
-  if state.loading_more or #state.messages >= state.total then
+  if state.loading_more or #state.threads >= state.total then
     return
   end
   state.loading_more = true
   local generation = state.load_generation
   local ok, err = pcall(function()
-    local raws = notmuch.page(query(), state.config.page_size, #state.messages)
+    local raws = notmuch.threads(query(), state.config.page_size, #state.threads)
     if generation ~= state.load_generation or not layout.is_open() then
       return
     end
     local known = {}
-    for _, message in ipairs(state.messages) do
-      known[message.id] = true
+    for _, thread in ipairs(state.threads) do
+      known[thread.id] = true
     end
     for _, raw in ipairs(raws) do
-      if not known[raw.id] then
-        state.messages[#state.messages + 1] = parse.summary(raw)
+      if not known[raw.thread] then
+        state.threads[#state.threads + 1] = parse.thread(raw)
       end
     end
     list.render()
@@ -130,7 +132,7 @@ function M.near_end()
   if not win or not vim.api.nvim_win_is_valid(win) then
     return false
   end
-  return vim.api.nvim_win_get_cursor(win)[1] > #state.messages - SCROLL_AHEAD
+  return vim.api.nvim_win_get_cursor(win)[1] > #state.threads - SCROLL_AHEAD
 end
 
 function M.reload(keep_id)
@@ -140,18 +142,16 @@ function M.reload(keep_id)
   end)
 end
 
-local function target()
-  if vim.api.nvim_get_current_win() == state.win.reader and state.current then
-    return state.current
-  end
-  return list.selected() or error("no message selected", 0)
+local function reading()
+  return vim.api.nvim_get_current_win() == state.win.reader and state.current ~= nil
 end
 
-local function full(message)
-  if message.blocks then
-    return message
+local function target()
+  if reading() then
+    return state.current
   end
-  return parse.message(notmuch.show(message.id), state.config.alternatives)
+  local thread = list.selected() or error("no conversation selected", 0)
+  return parse.message(notmuch.show(notmuch.newest_message(thread.id, query())), state.config.alternatives)
 end
 
 local function in_visual()
@@ -168,27 +168,24 @@ local function visual_rows()
   return first, last
 end
 
-local function targets()
-  if vim.api.nvim_get_current_win() == state.win.reader and state.current then
-    return { state.current }
-  end
+local function selected_threads()
   local out = {}
   if in_visual() then
     local first, last = visual_rows()
     for row = first, last do
-      out[#out + 1] = state.messages[row]
+      out[#out + 1] = state.threads[row]
     end
     return out
   end
-  for _, message in ipairs(state.messages) do
-    if state.marked[message.id] then
-      out[#out + 1] = message
+  for _, thread in ipairs(state.threads) do
+    if state.marked[thread.id] then
+      out[#out + 1] = thread
     end
   end
   if #out > 0 then
     return out
   end
-  return { target() }
+  return { list.selected() or error("no conversation selected", 0) }
 end
 
 local function ids_of(messages)
@@ -199,35 +196,39 @@ local function ids_of(messages)
   return ids
 end
 
-local function update_tags(ids, changes)
-  notmuch.tag(ids, changes)
-  local affected = {}
-  for _, id in ipairs(ids) do
-    affected[id] = true
+local function selection()
+  if reading() then
+    return { state.current }, {}, ("%q"):format(format.oneline(state.current.headers.Subject))
   end
-  local function apply(message)
-    if message and affected[message.id] then
-      for _, change in ipairs(changes) do
-        message.tags[change:sub(2)] = change:sub(1, 1) == "+" or nil
-      end
-    end
+  local threads = selected_threads()
+  local ids = {}
+  for _, thread in ipairs(threads) do
+    vim.list_extend(ids, thread.message_ids)
   end
-  for _, message in ipairs(state.messages) do
-    apply(message)
+  local files = notmuch.files_by_id(ids)
+  local messages = {}
+  for i, id in ipairs(ids) do
+    messages[i] = { id = id, files = files[id] }
   end
-  apply(state.current)
-  list.render()
-  M.refresh_counts()
+  local label = #threads == 1 and ("%q"):format(format.oneline(threads[1].headers.Subject))
+    or ("%d conversations"):format(#threads)
+  return messages, threads, label
 end
 
 local function toggle_tag(tag)
-  local messages = targets()
-  local any = false
-  for _, message in ipairs(messages) do
-    any = any or message.tags[tag] == true
+  local messages, threads = selection()
+  local any = reading() and state.current.tags[tag] == true
+  for _, thread in ipairs(threads) do
+    any = any or thread.tags[tag] == true
+  end
+  local change = (any and "-" or "+") .. tag
+  notmuch.tag(ids_of(messages), { change })
+  if reading() then
+    state.current.tags[tag] = not any or nil
   end
   state.marked = {}
-  update_tags(ids_of(messages), { (any and "-" or "+") .. tag })
+  M.load_list()
+  M.refresh_counts()
 end
 
 local function invite_of(message)
@@ -238,39 +239,63 @@ local function invite_of(message)
   return { summary = ical.summary(calendar), method = calendar.method }
 end
 
-local function show(summary)
-  local pending
+local function render_message(message)
+  local config = state.config
+  local segments = render.segments(message, config.renderers, config.markdown.types)
+  local doc = markdown.render(segments, layout.reader_width(), config.markdown)
+  if config.images.enabled then
+    images.append_attachments(message, doc, config.markdown.image)
+    images.pad_end(doc)
+  end
+  return doc
+end
+
+local function show(thread)
+  local pending = {}
   layout.with_busy("Opening", function()
-    local message = parse.message(notmuch.show(summary.id), state.config.alternatives)
-    local config = state.config
-    local segments = render.segments(message, config.renderers, config.markdown.types)
-    local doc = markdown.render(segments, layout.reader_width(), config.markdown)
-    local references = {}
-    if config.images.enabled then
-      images.append_attachments(message, doc, config.markdown.image)
-      images.pad_end(doc)
-      references = doc.images
+    local entries, unread = {}, {}
+    for _, raw in ipairs(notmuch.thread(thread.id)) do
+      local message = parse.message(raw, state.config.alternatives)
+      entries[#entries + 1] = { message = message, doc = render_message(message), invite = invite_of(message) }
+      if message.tags.unread then
+        unread[#unread + 1] = message.id
+      end
     end
-    state.current = message
-    local buf, first_row = reader.show(message, doc, invite_of(message))
+    state.thread = thread.id
+    local buf, focus = reader.show(thread.id, entries)
+    state.current = focus
     if not vim.b[buf].email_bound then
       M.bind(buf, { "global", "reader" })
       vim.b[buf].email_bound = true
     end
-    if message.tags.unread then
-      update_tags({ message.id }, { "-unread" })
+    if #unread > 0 then
+      notmuch.tag(unread, { "-unread" })
+      for _, entry in ipairs(entries) do
+        entry.message.tags.unread = nil
+      end
+      thread.tags.unread = nil
+      list.render()
+      M.refresh_counts()
     end
-    pending = { message = message, references = references, buf = buf, first_row = first_row }
+    if state.config.images.enabled then
+      for index, entry in ipairs(entries) do
+        if #entry.doc.images > 0 then
+          pending[#pending + 1] =
+            { message = entry.message, references = entry.doc.images, first_row = state.sections[index].body }
+        end
+      end
+    end
+    pending.buf = buf
   end)
   layout.focus("reader")
-  if pending and #pending.references > 0 then
-    images.show(pending.message, pending.references, pending.buf, pending.first_row)
+  if #pending > 0 then
+    images.show(pending, pending.buf)
   end
 end
 
 local function set_folder(folder)
   state.folder = folder
-  state.messages = {}
+  state.threads = {}
   state.marked = {}
   if state.reading then
     layout.close_reader()
@@ -280,22 +305,22 @@ end
 
 local function neighbour(affected)
   local last
-  for i, message in ipairs(state.messages) do
-    if affected[message.id] then
+  for i, thread in ipairs(state.threads) do
+    if affected[thread.id] then
       last = i
     end
   end
   if not last then
     return nil
   end
-  for i = last + 1, #state.messages do
-    if not affected[state.messages[i].id] then
-      return state.messages[i].id
+  for i = last + 1, #state.threads do
+    if not affected[state.threads[i].id] then
+      return state.threads[i].id
     end
   end
   for i = last - 1, 1, -1 do
-    if not affected[state.messages[i].id] then
-      return state.messages[i].id
+    if not affected[state.threads[i].id] then
+      return state.threads[i].id
     end
   end
   return nil
@@ -317,11 +342,11 @@ local function retag_inbox(into, out_of)
   end
 end
 
-local function relocate(messages, destination, label)
+local function relocate(messages, threads, destination, label)
   local ids = ids_of(messages)
   local affected = {}
-  for _, id in ipairs(ids) do
-    affected[id] = true
+  for _, thread in ipairs(threads) do
+    affected[thread.id] = true
   end
   local keep = neighbour(affected)
   local stash = vim.fn.tempname()
@@ -356,7 +381,7 @@ local function relocate(messages, destination, label)
   end)
   state.undo = undo
   state.marked = {}
-  if state.current and affected[state.current.id] then
+  if state.reading then
     layout.close_reader()
   end
   M.reload(keep)
@@ -377,11 +402,6 @@ local function single_account(messages)
     account = owner
   end
   return account
-end
-
-local function count_label(messages)
-  return #messages == 1 and ("%q"):format(format.oneline(messages[1].headers.Subject))
-    or ("%d messages"):format(#messages)
 end
 
 local function link_at(row, col)
@@ -459,21 +479,33 @@ local function step_folder(delta)
   set_folder(folders[(current - 1 + delta) % #folders + 1])
 end
 
-local function step_message(delta)
-  local id = state.current and state.current.id or (list.selected() or {}).id
-  for i, message in ipairs(state.messages) do
-    if message.id == id then
-      if delta > 0 and i + delta > #state.messages then
+local function step_thread(delta)
+  local id = state.thread or (list.selected() or {}).id
+  for i, thread in ipairs(state.threads) do
+    if thread.id == id then
+      if delta > 0 and i + delta > #state.threads then
         M.load_more()
       end
-      local next_message = state.messages[i + delta]
-      if not next_message then
+      local next_thread = state.threads[i + delta]
+      if not next_thread then
         return
       end
-      list.select_id(next_message.id)
-      show(next_message)
+      list.select_id(next_thread.id)
+      show(next_thread)
       return
     end
+  end
+end
+
+local function step_in_thread(delta)
+  local row = vim.api.nvim_win_get_cursor(state.win.reader)[1]
+  local _, index = reader.section_at(row)
+  local section = state.sections[(index or 1) + delta]
+  if section then
+    vim.api.nvim_win_set_cursor(state.win.reader, { section.first, 0 })
+    vim.api.nvim_win_call(state.win.reader, function()
+      vim.cmd("normal! zt")
+    end)
   end
 end
 
@@ -498,24 +530,25 @@ M.handlers = {
     prepare(compose.edit, target().id)
   end,
   archive = function()
-    relocate(targets(), function(account)
+    local messages, threads = selection()
+    relocate(messages, threads, function(account)
       return account.archive or error(("account %s has no archive folder"):format(account.name), 0)
     end, "Archiving")
   end,
   delete = function()
-    local messages = targets()
+    local messages, threads, label = selection()
     local files = notmuch.files_by_id(ids_of(messages))
     local permanent = vim.iter(messages):any(function(message)
       local account = compose.account_of_message(message)
       return account.trash == nil or in_trash(account, files[message.id], compose.root(account))
     end)
     if permanent then
-      local question = ("Permanently delete %s?"):format(count_label(messages))
+      local question = ("Permanently delete %s?"):format(label)
       if vim.fn.confirm(question, "&Delete\n&Cancel", 2) ~= 1 then
         return
       end
     end
-    relocate(messages, function(account, own, root)
+    relocate(messages, threads, function(account, own, root)
       if in_trash(account, own, root) then
         return nil
       end
@@ -535,12 +568,11 @@ M.handlers = {
     vim.notify(("email.nvim: undid %s"):format(undo.label:lower()))
   end,
   move = function()
-    local messages = targets()
+    local messages, threads, label = selection()
     local account = single_account(messages)
-    local folder =
-      async.select(maildir.folders(compose.root(account)), { prompt = "Move " .. count_label(messages) .. " to" })
+    local folder = async.select(maildir.folders(compose.root(account)), { prompt = "Move " .. label .. " to" })
     if folder then
-      relocate(messages, function()
+      relocate(messages, threads, function()
         return folder
       end, "Moving")
     end
@@ -564,24 +596,24 @@ M.handlers = {
     if in_visual() then
       local first, last = visual_rows()
       for row = first, last do
-        local message = state.messages[row]
-        state.marked[message.id] = not state.marked[message.id] or nil
+        local thread = state.threads[row]
+        state.marked[thread.id] = not state.marked[thread.id] or nil
       end
       list.render()
       return
     end
-    local message = list.selected()
-    if not message then
+    local thread = list.selected()
+    if not thread then
       return
     end
-    state.marked[message.id] = not state.marked[message.id] or nil
+    state.marked[thread.id] = not state.marked[thread.id] or nil
     local row = vim.api.nvim_win_get_cursor(state.win.list)[1]
     list.render()
-    vim.api.nvim_win_set_cursor(state.win.list, { math.min(row + 1, math.max(1, #state.messages)), 0 })
+    vim.api.nvim_win_set_cursor(state.win.list, { math.min(row + 1, math.max(1, #state.threads)), 0 })
   end,
   mark_all = function()
-    for _, message in ipairs(state.messages) do
-      state.marked[message.id] = true
+    for _, thread in ipairs(state.threads) do
+      state.marked[thread.id] = true
     end
     list.render()
   end,
@@ -590,7 +622,7 @@ M.handlers = {
     list.render()
   end,
   attachments = function()
-    local message = full(target())
+    local message = target()
     if #message.attachments == 0 then
       vim.notify("email.nvim: no attachments")
       return
@@ -670,9 +702,9 @@ M.handlers = {
     end
   end,
   open = function()
-    local message = list.selected()
-    if message then
-      show(message)
+    local thread = list.selected()
+    if thread then
+      show(thread)
     end
   end,
   quit = function()
@@ -703,10 +735,16 @@ M.handlers = {
     vim.api.nvim_feedkeys(vim.keycode("<LeftMouse>"), "n", false)
   end,
   next_message = function()
-    step_message(1)
+    step_thread(1)
   end,
   prev_message = function()
-    step_message(-1)
+    step_thread(-1)
+  end,
+  next_in_thread = function()
+    step_in_thread(1)
+  end,
+  prev_in_thread = function()
+    step_in_thread(-1)
   end,
   focus_list = function()
     layout.focus("list")
@@ -749,6 +787,17 @@ function M.bind(buf, contexts)
         end
       end
     end
+  end
+  if vim.tbl_contains(contexts, "reader") then
+    vim.api.nvim_create_autocmd("CursorMoved", {
+      buffer = buf,
+      callback = function()
+        local section = reader.section_at(vim.api.nvim_win_get_cursor(0)[1])
+        if section then
+          state.current = section.message
+        end
+      end,
+    })
   end
   if vim.tbl_contains(contexts, "list") then
     vim.api.nvim_create_autocmd("CursorMoved", {

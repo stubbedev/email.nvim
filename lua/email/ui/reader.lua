@@ -5,7 +5,7 @@ local state = require("email.state")
 
 local M = {}
 
-local HEADERS = { "From", "To", "Cc", "Subject" }
+local HEADERS = { "From", "To", "Cc" }
 local LABEL_WIDTH = 9
 local INVITE_ACTIONS = { { "accept", "accept" }, { "decline", "decline" }, { "tentative", "maybe" } }
 
@@ -77,10 +77,10 @@ function M.lines(message, body, width, invite, config)
   return lines, highlights
 end
 
-local function footer(message, keymaps)
+local function footer(thread_id, keymaps)
   local position = ""
-  for i, entry in ipairs(state.messages) do
-    if entry.id == message.id then
+  for i, entry in ipairs(state.threads) do
+    if entry.id == thread_id then
       position = (" %d of %d "):format(i, state.total)
     end
   end
@@ -94,38 +94,93 @@ local function footer(message, keymaps)
   return position .. (#hints > 0 and ("· " .. table.concat(hints, " · ") .. " ") or "")
 end
 
-function M.show(message, doc, invite)
+local function fold_body(win, first, last)
+  if last >= first then
+    vim.api.nvim_win_call(win, function()
+      vim.cmd(("%d,%dfold"):format(first, last))
+    end)
+  end
+end
+
+function M.show(thread_id, entries)
   local buf = layout.open_reader()
-  local width = vim.api.nvim_win_get_width(state.win.reader)
-  local lines, highlights = M.lines(message, doc.lines, width, invite, state.config)
-  local first_row = #lines - #doc.lines
+  local win = state.win.reader
+  local width = vim.api.nvim_win_get_width(win)
+  local lines, highlights, line_highlights, links, sections = {}, {}, {}, {}, {}
+  for index, entry in ipairs(entries) do
+    if index > 1 then
+      lines[#lines + 1] = ""
+    end
+    local start = #lines + 1
+    local block, block_highlights = M.lines(entry.message, entry.doc.lines, width, entry.invite, state.config)
+    local offset = #lines
+    local body_start = offset + #block - #entry.doc.lines
+    vim.list_extend(lines, block)
+    for _, hl in ipairs(block_highlights) do
+      highlights[#highlights + 1] = { hl[1] + offset, hl[2], hl[3], hl[4] }
+    end
+    for _, line in ipairs(entry.doc.line_highlights) do
+      line_highlights[#line_highlights + 1] = { body_start + line[1], line[2] }
+    end
+    for _, hl in ipairs(entry.doc.highlights) do
+      highlights[#highlights + 1] = { body_start + hl[1], hl[2], hl[3], hl[4] }
+    end
+    for _, link in ipairs(entry.doc.links) do
+      links[#links + 1] =
+        { row = body_start + link.row, start_col = link.start_col, end_col = link.end_col, url = link.url }
+    end
+    sections[index] = { first = start, body = body_start, last = #lines, message = entry.message }
+  end
   layout.set_lines(buf, lines)
   vim.api.nvim_buf_clear_namespace(buf, highlight.ns, 0, -1)
   for _, hl in ipairs(highlights) do
     highlight.apply(buf, hl[1] - 1, { { hl[2], hl[3], hl[4] } })
   end
-  for _, line in ipairs(doc.line_highlights) do
-    vim.api.nvim_buf_set_extmark(buf, highlight.ns, first_row + line[1] - 1, 0, { line_hl_group = line[2] })
+  for _, line in ipairs(line_highlights) do
+    vim.api.nvim_buf_set_extmark(buf, highlight.ns, line[1] - 1, 0, { line_hl_group = line[2] })
   end
-  for _, hl in ipairs(doc.highlights) do
-    highlight.apply(buf, first_row + hl[1] - 1, { { hl[2], hl[3], hl[4] } })
-  end
-  state.reader_links = {}
-  for _, link in ipairs(doc.links) do
-    local row = first_row + link.row
-    vim.api.nvim_buf_set_extmark(buf, highlight.ns, row - 1, link.start_col, {
+  for _, link in ipairs(links) do
+    vim.api.nvim_buf_set_extmark(buf, highlight.ns, link.row - 1, link.start_col, {
       end_col = link.end_col,
       url = link.url,
     })
-    state.reader_links[#state.reader_links + 1] =
-      { row = row, start_col = link.start_col, end_col = link.end_col, url = link.url }
   end
-  vim.api.nvim_win_set_cursor(state.win.reader, { 1, 0 })
-  local subject = format.oneline(message.headers.Subject)
+  state.reader_links = links
+  state.sections = sections
+  vim.wo[win].foldmethod = "manual"
+  vim.wo[win].foldenable = true
+  vim.api.nvim_win_call(win, function()
+    vim.cmd("normal! zE")
+  end)
+  local focus = #sections
+  for index, section in ipairs(sections) do
+    if section.message.tags.unread then
+      focus = index
+      break
+    end
+  end
+  for index = 1, focus - 1 do
+    fold_body(win, sections[index].body + 1, sections[index].last)
+  end
+  vim.api.nvim_win_set_cursor(win, { sections[focus].first, 0 })
+  vim.api.nvim_win_call(win, function()
+    vim.cmd("normal! zt")
+  end)
+  local subject = format.oneline(entries[1].message.headers.Subject)
   layout.set_title("reader", subject ~= "" and vim.trim(format.fit(subject, width - 4)) or "Email")
-  state.reader_footer = footer(message, state.config.keymaps.reader)
+  state.reader_footer = footer(thread_id, state.config.keymaps.reader)
   layout.set_status("reader", nil, state.reader_footer)
-  return buf, first_row
+  return buf, sections[focus].message
+end
+
+function M.section_at(row)
+  for index = #(state.sections or {}), 1, -1 do
+    local section = state.sections[index]
+    if row >= section.first then
+      return section, index
+    end
+  end
+  return nil
 end
 
 return M

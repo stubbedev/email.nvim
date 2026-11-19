@@ -226,6 +226,7 @@ function M.close()
     wipe(state.buf[name])
   end
   state.win, state.buf, state.reading, state.current = {}, {}, false, nil
+  state.thread, state.sections = nil, nil
   bars = {}
   vim.api.nvim_clear_autocmds({ group = group })
   state.closing = false
@@ -331,6 +332,7 @@ function M.close_reader()
   wipe(buf)
   bars.reader = nil
   state.win.reader, state.buf.reader, state.reading, state.current = nil, nil, false, nil
+  state.thread, state.sections = nil, nil
   if not full() then
     set_hidden(false)
     M.resize()

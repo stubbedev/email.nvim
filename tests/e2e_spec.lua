@@ -139,7 +139,7 @@ local function read_sent()
 end
 local function subjects()
   local out = {}
-  for i, message in ipairs(state.messages) do
+  for i, message in ipairs(state.threads) do
     out[i] = message.headers.Subject
   end
   return out
@@ -152,7 +152,7 @@ end
 describe("e2e: the reader shows an invite row for calendar invitations", function()
   vim.cmd("Email")
   wait("list", function()
-    return #state.messages == 4
+    return #state.threads == 4
   end)
   eq({ "Invitation: Team sync", "Hello 3", "Hello 2", "Hello 1" }, subjects())
   focus_row(1)
@@ -261,7 +261,7 @@ describe("e2e: marked messages are archived together", function()
   eq(2, vim.tbl_count(state.marked))
   keys("a")
   wait("archive", function()
-    return #state.messages == 2
+    return #state.threads == 2
   end)
   eq({ "Invitation: Team sync", "Hello 3" }, subjects())
   eq(2, #files("Archive"))
@@ -276,7 +276,7 @@ describe("e2e: a visual selection is deleted in one go", function()
   end
   keys("Vjd")
   wait("delete", function()
-    return #state.messages == 0
+    return #state.threads == 0
   end)
   vim.fn.confirm = confirm
   eq(0, #files("INBOX"))
@@ -325,7 +325,7 @@ describe("e2e: inline cid and data images and attached photos are placed in the 
   assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
   vim.cmd("Email")
   wait("picture message", function()
-    return #state.messages == 1
+    return #state.threads == 1
   end)
   focus_row(1)
   keys("<CR>")
@@ -397,7 +397,7 @@ describe("e2e: attached photos are not drawn once the attachment list collapses"
   assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
   vim.cmd("EmailSearch id:many@example.org")
   wait("upload message", function()
-    return #state.messages == 1 and state.messages[1].id == "many@example.org"
+    return #state.threads == 1 and state.threads[1].message_ids[1] == "many@example.org"
   end)
   local before = #placed
   focus_row(1)
@@ -479,7 +479,7 @@ describe("e2e: scrolling near the end of the list loads the next batch", functio
   state.config.page_size = 2
   vim.cmd("EmailSearch *")
   wait("the first batch", function()
-    return state.busy == 0 and #state.messages == 2 and state.total > 3
+    return state.busy == 0 and #state.threads == 2 and state.total > 3
   end)
   local total = state.total
   focus_row(2)
@@ -488,21 +488,21 @@ describe("e2e: scrolling near the end of the list loads the next batch", functio
     if state.loading_more then
       return false
     end
-    if #state.messages < total then
-      focus_row(#state.messages)
+    if #state.threads < total then
+      focus_row(#state.threads)
       vim.api.nvim_exec_autocmds("CursorMoved", { buffer = state.buf.list })
       return false
     end
     return true
   end)
   local seen = {}
-  for _, message in ipairs(state.messages) do
+  for _, message in ipairs(state.threads) do
     eq(nil, seen[message.id])
     seen[message.id] = true
   end
   require("email.async").run(require("email.actions").load_list)
   wait("a refresh keeps every loaded message", function()
-    return state.busy == 0 and #state.messages == total
+    return state.busy == 0 and #state.threads == total
   end)
   state.config.page_size = 100
   eq({}, errors)
@@ -513,7 +513,7 @@ describe("e2e: clicking a link in a message opens it and the mouse is put back",
   vim.o.mouse = ""
   vim.cmd("EmailSearch id:many@example.org")
   wait("message", function()
-    return state.busy == 0 and #state.messages == 1
+    return state.busy == 0 and #state.threads == 1
   end)
   focus_row(1)
   keys("<CR>")
@@ -563,7 +563,7 @@ describe("e2e: delete moves to the trash, undo brings it back, and deleting from
   assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
   vim.cmd("EmailSearch id:trash@example.org")
   wait("message", function()
-    return state.busy == 0 and #state.messages == 1
+    return state.busy == 0 and #state.threads == 1
   end)
   local asked = 0
   local confirm = vim.fn.confirm
@@ -595,7 +595,7 @@ describe("e2e: delete moves to the trash, undo brings it back, and deleting from
   end)
   vim.cmd("EmailSearch id:trash@example.org")
   wait("message in the trash", function()
-    return state.busy == 0 and #state.messages == 1
+    return state.busy == 0 and #state.threads == 1
   end)
   focus_row(1)
   keys("d")
@@ -608,3 +608,72 @@ describe("e2e: delete moves to the trash, undo brings it back, and deleting from
   state.config.accounts[1].trash = nil
   eq({}, errors)
 end)
+
+describe(
+  "e2e: a conversation opens whole, older read messages folded, actions on the message under the cursor",
+  function()
+    require("email.ui.layout").close()
+    local function message(n, subject, extra, flags)
+      write(
+        ("%s/acct/INBOX/cur/20%02d.x,U=%d:2,%s"):format(mail, n, 100 + n, flags),
+        ("From: Person %d <p%d@example.org>\nTo: me@example.com\nSubject: %s\nMessage-ID: <c%d@example.org>\n"):format(
+          n,
+          n,
+          subject,
+          n
+        )
+          .. extra
+          .. ("Date: Thu, 19 Nov 2026 11:0%d:00 +0000\n\nbody %d\nsecond line\nthird line\n"):format(n, n)
+      )
+    end
+    message(1, "Plans", "", "S")
+    message(2, "Re: Plans", "In-Reply-To: <c1@example.org>\nReferences: <c1@example.org>\n", "S")
+    message(3, "Re: Plans", "In-Reply-To: <c2@example.org>\nReferences: <c1@example.org> <c2@example.org>\n", "")
+    assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
+    vim.cmd("EmailSearch id:c1@example.org or id:c2@example.org or id:c3@example.org")
+    wait("one conversation", function()
+      return state.busy == 0 and #state.threads == 1
+    end)
+    eq(3, state.threads[1].total)
+    local row = vim.api.nvim_buf_get_lines(state.buf.list, 0, 1, false)[1]
+    eq(true, row:find("Person 1, Person 2, Person 3", 1, true) ~= nil or row:find(" 3  ", 1, true) ~= nil)
+    focus_row(1)
+    keys("<CR>")
+    wait("the conversation", function()
+      return state.sections ~= nil and #state.sections == 3 and state.busy == 0
+    end)
+    eq("c3@example.org", state.current.id)
+    eq(state.sections[3].first, vim.api.nvim_win_get_cursor(state.win.reader)[1])
+    local function closed_at(index)
+      return vim.api.nvim_win_call(state.win.reader, function()
+        return vim.fn.foldclosed(state.sections[index].body + 1)
+      end)
+    end
+    eq(true, closed_at(1) > 0)
+    eq(true, closed_at(2) > 0)
+    eq(-1, closed_at(3))
+    keys("[m")
+    eq(state.sections[2].first, vim.api.nvim_win_get_cursor(state.win.reader)[1])
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = state.buf.reader })
+    eq("c2@example.org", state.current.id)
+    keys("r")
+    wait("composer", function()
+      return vim.bo.filetype == "mail"
+    end)
+    local header = vim.api.nvim_buf_get_lines(0, 0, 4, false)
+    eq("To: Person 2 <p2@example.org>", header[2])
+    vim.cmd("stopinsert")
+    vim.bo.modified = false
+    vim.api.nvim_win_close(0, true)
+    local tags = vim.system({ "notmuch", "search", "--output=tags", "id:c3@example.org" }):wait().stdout or ""
+    eq(nil, tags:find("unread", 1, true))
+    keys("q")
+    focus_row(1)
+    keys("a")
+    wait("the conversation archived", function()
+      return state.busy == 0 and #vim.fn.glob(mail .. "/acct/INBOX/cur/20*", false, true) == 0
+    end)
+    eq(3, #vim.fn.glob(mail .. "/acct/Archive/cur/20*", false, true))
+    eq({}, errors)
+  end
+)

@@ -1,6 +1,6 @@
 local state = {}
 state.total = 0
-state.messages = {}
+state.threads = {}
 state.marked = {}
 state.unread = {}
 state.reading = false

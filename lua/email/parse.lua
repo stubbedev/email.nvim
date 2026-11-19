@@ -89,6 +89,53 @@ local function tag_set(tags)
   return set
 end
 
+function M.matched_ids(query)
+  local ids, at = {}, 1
+  query = query or ""
+  while true do
+    local start = query:find("id:", at, true)
+    if not start then
+      return ids
+    end
+    local rest = start + 3
+    if query:sub(rest, rest) == '"' then
+      local value, stop = {}, rest + 1
+      while stop <= #query do
+        local c = query:sub(stop, stop)
+        if c == '"' and query:sub(stop + 1, stop + 1) == '"' then
+          value[#value + 1] = '"'
+          stop = stop + 2
+        elseif c == '"' then
+          break
+        else
+          value[#value + 1] = c
+          stop = stop + 1
+        end
+      end
+      ids[#ids + 1] = table.concat(value)
+      at = stop + 1
+    else
+      local value = query:match("^(%S+)", rest)
+      ids[#ids + 1] = value
+      at = rest + #value
+    end
+  end
+end
+
+function M.thread(raw)
+  local matched, others = (raw.authors or ""):match("^(.-)|(.*)$")
+  local authors = matched and (vim.trim(matched) .. ", " .. vim.trim(others)) or (raw.authors or "")
+  return {
+    id = raw.thread,
+    timestamp = raw.timestamp,
+    tags = tag_set(raw.tags),
+    authors = authors:gsub("^, ", ""):gsub(", $", ""),
+    headers = { Subject = raw.subject or "" },
+    total = raw.total,
+    message_ids = M.matched_ids(raw.query and raw.query[1]),
+  }
+end
+
 function M.summary(raw)
   return {
     id = raw.id,

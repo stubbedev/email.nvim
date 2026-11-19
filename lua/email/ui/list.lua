@@ -19,7 +19,7 @@ local function title()
 end
 
 local function status()
-  local left = (" %d of %d loaded "):format(#state.messages, state.total)
+  local left = (" %d of %d loaded "):format(#state.threads, state.total)
   local marked = vim.tbl_count(state.marked)
   local right = marked > 0 and (" %d marked · %d messages "):format(marked, state.total)
     or (" %d messages "):format(state.total)
@@ -35,7 +35,7 @@ function M.render(keep_id)
   local width = vim.api.nvim_win_get_width(win)
   local now = os.time()
   local lines, highlights, cursor = {}, {}, 1
-  for i, message in ipairs(state.messages) do
+  for i, message in ipairs(state.threads) do
     lines[i], highlights[i] = format.row(message, width, state.config.icons, now, state.marked[message.id])
     if message.id == keep_id then
       cursor = i
@@ -48,7 +48,7 @@ function M.render(keep_id)
   vim.api.nvim_buf_clear_namespace(buf, highlight.ns, 0, -1)
   for i, hls in ipairs(highlights) do
     highlight.apply(buf, i - 1, hls)
-    if state.marked[state.messages[i].id] then
+    if state.marked[state.threads[i].id] then
       vim.api.nvim_buf_set_extmark(buf, highlight.ns, i - 1, 0, { line_hl_group = "EmailMarked" })
     end
   end
@@ -61,11 +61,11 @@ function M.selected()
   if not state.win.list or not vim.api.nvim_win_is_valid(state.win.list) then
     return nil
   end
-  return state.messages[vim.api.nvim_win_get_cursor(state.win.list)[1]]
+  return state.threads[vim.api.nvim_win_get_cursor(state.win.list)[1]]
 end
 
 function M.select_id(id)
-  for i, message in ipairs(state.messages) do
+  for i, message in ipairs(state.threads) do
     if message.id == id then
       vim.api.nvim_win_set_cursor(state.win.list, { i, 0 })
       return message

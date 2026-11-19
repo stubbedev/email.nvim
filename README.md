@@ -6,7 +6,11 @@ A floating layout with folders beside the message list; an opened message takes 
 [himalaya.nvim](https://github.com/knownasnaffy/himalaya.nvim), backed by notmuch instead of the himalaya CLI, so
 listing, searching and opening mail is instant on a local Maildir kept in sync by mbsync, offlineimap or similar.
 
-- Folders are notmuch queries with live unread counts.
+- Folders are notmuch queries with live unread counts. The list shows **conversations** (notmuch threads) with
+  their authors and message count; opening one shows every message in it, oldest first, with older read messages
+  folded (`za` opens one) and the cursor on the first unread. Reply, forward and the other message actions apply to
+  the message under the cursor; from the list they apply to the newest message of the conversation that is in the
+  folder, and archive, delete and move take all of the conversation's messages that are in the folder.
 - Every MIME type can go through your own **renderer**: an argv that reads the part on stdin, or a Lua function. Use
   it to turn HTML mail into Markdown, render calendar invites, and so on.
 - Markdown output is **rendered**, in the style of render-markdown.nvim: headings with icons and tinted backgrounds,
@@ -128,7 +132,7 @@ and the rarer actions live under `<leader>m`, so which-key lists them. Press `g?
 | list | `<CR>` `q` | open, quit (more messages load as you scroll) |
 | | `<Tab>` `<C-a>` `<Esc>` | toggle mark (or the visual selection), mark the page, clear marks |
 | | `<C-h>` | focus folders |
-| message | `q` `]]` `[[` `gx` click | back to the list, next and previous message, open the link under the cursor or the mouse |
+| message | `q` `]]` `[[` `]m` `[m` `gx` click | back to the list, next and previous conversation, next and previous message in it, open the link under the cursor or the mouse |
 | folders | `<CR>` `q` `<C-l>` | open folder, quit, focus list |
 | composer | `<leader>ms` `<leader>md` `:w` | send, discard, save draft |
 

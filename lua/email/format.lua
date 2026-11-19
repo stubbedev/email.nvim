@@ -81,10 +81,11 @@ function M.row(message, width, icons, now, marked)
   segments[#segments + 1] = { marked and M.fit(icons.marked, 1) or " ", marked and "EmailMarker" or nil }
   segments[#segments + 1] = { M.fit(status, iw) .. " ", status_hl }
   segments[#segments + 1] = { M.fit(message.tags.attachment and icons.attachment or "", iw) .. " ", "EmailAttachment" }
-  segments[#segments + 1] = {
-    M.fit(M.oneline(M.sender(message.headers.From)), SENDER_WIDTH) .. "  ",
-    unread and "EmailSenderUnread" or "EmailSender",
-  }
+  local who = M.oneline(message.authors or M.sender(message.headers.From))
+  local badge = (message.total or 1) > 1 and (" " .. message.total) or ""
+  local name = M.fit(who, SENDER_WIDTH - #badge)
+  segments[#segments + 1] = { name, unread and "EmailSenderUnread" or "EmailSender" }
+  segments[#segments + 1] = { badge .. "  ", "EmailCount" }
   local used = 0
   for _, segment in ipairs(segments) do
     used = used + vim.fn.strdisplaywidth(segment[1])

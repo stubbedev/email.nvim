@@ -119,3 +119,25 @@ describe("text parts with attachment disposition are attachments", function()
   eq({}, m.blocks)
   eq("a.csv", m.attachments[1].filename)
 end)
+
+describe("matched_ids reads bare and quoted ids from a notmuch summary query", function()
+  eq({ "a@x", 'we"ird id@y', "b@z" }, parse.matched_ids('id:a@x id:"we""ird id@y" id:b@z'))
+  eq({}, parse.matched_ids(nil))
+end)
+
+describe("thread joins matched and other authors and keeps the matched ids", function()
+  local thread = parse.thread({
+    thread = "0001",
+    timestamp = 5,
+    total = 3,
+    authors = "Ann, Bob| Cid",
+    subject = "Plans",
+    tags = { "inbox", "unread" },
+    query = { "id:1@x id:2@x", "id:3@x" },
+  })
+  eq("0001", thread.id)
+  eq("Ann, Bob, Cid", thread.authors)
+  eq({ "1@x", "2@x" }, thread.message_ids)
+  eq(true, thread.tags.unread)
+  eq(3, thread.total)
+end)

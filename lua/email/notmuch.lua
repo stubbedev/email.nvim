@@ -48,37 +48,68 @@ function M.ids_query(ids)
   return table.concat(parts, " or ")
 end
 
-function M.page(query, limit, offset)
-  local ids = decode(run({
+function M.threads(query, limit, offset)
+  return decode(run({
     "search",
     "--format=json",
-    "--output=messages",
+    "--output=summary",
     "--sort=newest-first",
     "--limit=" .. limit,
     "--offset=" .. offset,
     "--",
     query,
   }))
-  if #ids == 0 then
-    return {}
+end
+
+function M.newest_message(thread_id, query)
+  local id = vim.trim(run({
+    "search",
+    "--output=messages",
+    "--sort=newest-first",
+    "--limit=1",
+    "--",
+    ("thread:%s and (%s)"):format(thread_id, query),
+  }))
+  if id == "" then
+    error(("thread %s has no message matching %s"):format(thread_id, query), 0)
   end
-  local by_id = {}
-  for _, message in
-    ipairs(shown(run({
+  return (id:gsub("^id:", ""))
+end
+
+function M.count_threads(query)
+  return tonumber(vim.trim(run({ "count", "--output=threads", "--", query })))
+end
+
+local function conversation(nodes, out)
+  nodes = nodes or {}
+  for i = 1, table.maxn(nodes) do
+    local node = nodes[i] or {}
+    if node[1] and not node[1].excluded then
+      out[#out + 1] = node[1]
+    end
+    conversation(node[2], out)
+  end
+end
+
+function M.thread(thread_id)
+  local out = {}
+  for _, thread in
+    ipairs(decode(run({
       "show",
       "--format=json",
-      "--body=false",
-      "--entire-thread=false",
-      "--exclude=false",
+      "--include-html",
+      "--entire-thread=true",
       "--",
-      M.ids_query(ids),
+      "thread:" .. thread_id,
     })))
   do
-    by_id[message.id] = message
+    conversation(thread, out)
   end
-  local out = {}
-  for i, id in ipairs(ids) do
-    out[i] = by_id[id] or error(("notmuch search returned %s but notmuch show did not"):format(id), 0)
+  table.sort(out, function(a, b)
+    return a.timestamp < b.timestamp
+  end)
+  if #out == 0 then
+    error(("thread %s has no messages"):format(thread_id), 0)
   end
   return out
 end

@@ -112,29 +112,33 @@ function M.clear()
   shown = {}
 end
 
-function M.show(message, references, buf, first_row)
+function M.show(groups, buf)
   M.clear()
   local options = state.config.images
   local dir = vim.fn.tempname()
   vim.fn.mkdir(dir, "p")
   local placement = require("snacks").image.placement
-  for index, reference in ipairs(references) do
-    local src
-    if reference.source:match("^https?://") then
-      src = options.remote and reference.source or nil
-    else
-      src = M.resolve(message, reference, dir, index)
-    end
-    if not state.current or state.current.id ~= message.id or not vim.api.nvim_buf_is_valid(buf) then
-      return
-    end
-    if src then
-      shown[#shown + 1] = placement.new(buf, src, {
-        pos = { first_row + reference.row, 0 },
-        inline = true,
-        max_width = options.max_width,
-        max_height = options.max_height,
-      })
+  local thread, written = state.thread, 0
+  for _, group in ipairs(groups) do
+    for _, reference in ipairs(group.references) do
+      written = written + 1
+      local src
+      if reference.source:match("^https?://") then
+        src = options.remote and reference.source or nil
+      else
+        src = M.resolve(group.message, reference, dir, written)
+      end
+      if state.thread ~= thread or not vim.api.nvim_buf_is_valid(buf) then
+        return
+      end
+      if src then
+        shown[#shown + 1] = placement.new(buf, src, {
+          pos = { group.first_row + reference.row, 0 },
+          inline = true,
+          max_width = options.max_width,
+          max_height = options.max_height,
+        })
+      end
     end
   end
 end
