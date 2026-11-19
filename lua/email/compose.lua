@@ -1,14 +1,11 @@
 local async = require("email.async")
+local document = require("email.document")
 local engine = require("email.engine")
 local format = require("email.format")
 local layout = require("email.ui.layout")
-local markdown = require("email.markdown")
-local render = require("email.render")
 local state = require("email.state")
 
 local M = {}
-
-local QUOTE_WIDTH = 72
 
 local function preferred()
   return state.folder and state.folder.account or 0
@@ -24,12 +21,6 @@ function M.account_of_message(message)
   local number = accounts[1]
     or error(("message %s has no file in any configured account maildir"):format(message.id), 0)
   return state.config.accounts[number]
-end
-
-local function plain_text(message)
-  local config = state.config
-  local segments = render.segments(message, config.renderers, config.markdown.types)
-  return markdown.render(segments, QUOTE_WIDTH, vim.tbl_extend("force", config.markdown, { inline_urls = true })).lines
 end
 
 local function quote(lines)
@@ -91,11 +82,11 @@ local function threading(reply)
 end
 
 function M.reply(id, all)
-  local message = engine.message(id)
+  local message = engine.message(id, nil, document.QUOTE)
   local reply = engine.reply(id, all, preferred())
   local body = opening(state.config.accounts[reply.account])
   body[#body + 1] = ("On %s, %s wrote:"):format(os.date("%Y-%m-%d %H:%M", message.timestamp), message.headers.From)
-  vim.list_extend(body, quote(plain_text(message)))
+  vim.list_extend(body, quote(document.of(message, document.QUOTE).lines))
   return {
     headers = { From = reply.from, To = reply.to, Cc = reply.cc, Subject = reply.subject },
     hidden = threading(reply),
@@ -105,13 +96,13 @@ function M.reply(id, all)
 end
 
 function M.forward(id)
-  local message = engine.message(id)
+  local message = engine.message(id, nil, document.QUOTE)
   local account = M.account_of_message(message)
   local body = opening(account)
   body[#body + 1] = "---------- Forwarded message ----------"
-  vim.list_extend(body, render.header_lines(message.headers))
+  vim.list_extend(body, message.header_lines)
   body[#body + 1] = ""
-  vim.list_extend(body, plain_text(message))
+  vim.list_extend(body, document.of(message, document.QUOTE).lines)
   return {
     headers = { From = account.from, To = "", Cc = "", Subject = "Fwd: " .. (message.headers.Subject or "") },
     hidden = {},
@@ -123,7 +114,7 @@ end
 local VISIBLE_HEADERS = { "From", "To", "Cc", "Bcc", "Reply-To", "Subject" }
 
 function M.edit(id)
-  local message = engine.message(id, { "text/plain", "text/html" })
+  local message = engine.message(id, { "text/plain", "text/html" }, document.PLAIN)
   if not message.tags.draft then
     error("only drafts can be edited; this message is not tagged draft", 0)
   end
@@ -134,7 +125,7 @@ function M.edit(id)
   return {
     headers = headers,
     hidden = { ["In-Reply-To"] = message.headers["In-Reply-To"], References = message.headers.References },
-    body = render.body(message, {}),
+    body = document.of(message, document.PLAIN).lines,
     attach = extract_attachments(id, message.attachments),
     draft_id = id,
   }

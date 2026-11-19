@@ -1,7 +1,5 @@
 local M = {}
 
-M.ns = vim.api.nvim_create_namespace("email.nvim")
-
 local GROUPS = {
   EmailUnread = { link = "DiagnosticInfo" },
   EmailFlagged = { link = "DiagnosticWarn" },
@@ -82,12 +80,6 @@ function M.setup()
       apply_groups(derived())
     end,
   })
-end
-
-function M.apply(buf, row, highlights)
-  for _, hl in ipairs(highlights) do
-    vim.api.nvim_buf_set_extmark(buf, M.ns, row, hl[1], { end_col = hl[2], hl_group = hl[3] })
-  end
 end
 
 return M

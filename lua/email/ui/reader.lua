@@ -1,5 +1,5 @@
+local decorations = require("email.ui.decorations")
 local format = require("email.format")
-local highlight = require("email.ui.highlight")
 local layout = require("email.ui.layout")
 local state = require("email.state")
 
@@ -81,7 +81,7 @@ local function footer(thread_id, keymaps)
   local position = ""
   for i, entry in ipairs(state.threads) do
     if entry.id == thread_id then
-      position = (" %d of %d "):format(i, state.total)
+      position = (" %d of %s "):format(i, state.total or "…")
     end
   end
   local hints = {}
@@ -132,19 +132,17 @@ function M.show(thread_id, entries)
     sections[index] = { first = start, body = body_start, last = #lines, message = entry.message }
   end
   layout.set_lines(buf, lines)
-  vim.api.nvim_buf_clear_namespace(buf, highlight.ns, 0, -1)
+  local decorated = decorations.rows()
   for _, hl in ipairs(highlights) do
-    highlight.apply(buf, hl[1] - 1, { { hl[2], hl[3], hl[4] } })
+    decorations.span(decorated, hl[1] - 1, hl[2], hl[3], hl[4])
   end
   for _, line in ipairs(line_highlights) do
-    vim.api.nvim_buf_set_extmark(buf, highlight.ns, line[1] - 1, 0, { line_hl_group = line[2] })
+    decorations.line(decorated, line[1] - 1, line[2])
   end
   for _, link in ipairs(links) do
-    vim.api.nvim_buf_set_extmark(buf, highlight.ns, link.row - 1, link.start_col, {
-      end_col = link.end_col,
-      url = link.url,
-    })
+    decorations.link(decorated, link.row - 1, link.start_col, link.end_col, link.url)
   end
+  decorations.set(buf, decorated)
   state.reader_links = links
   state.sections = sections
   vim.wo[win].foldmethod = "manual"

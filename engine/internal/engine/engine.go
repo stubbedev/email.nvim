@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/mail"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 
+	"github.com/stubbedev/email.nvim/engine/internal/doc"
 	"github.com/stubbedev/email.nvim/engine/internal/notmuch"
 	"github.com/stubbedev/email.nvim/engine/internal/smtp"
 	"github.com/stubbedev/email.nvim/engine/internal/view"
@@ -38,6 +40,7 @@ type AccountConfig struct {
 
 type Config struct {
 	Accounts        []AccountConfig `json:"accounts"`
+	Markdown        doc.Options     `json:"markdown"`
 	Alternatives    []string        `json:"alternatives"`
 	RawTypes        []string        `json:"raw_types"`
 	Images          bool            `json:"images"`
@@ -84,13 +87,20 @@ type Engine struct {
 	accounts identities
 	view     view.Options
 	html     bool
+	markdown doc.Options
 	mu       sync.RWMutex
+	cache    cache
+	cursor   cursor
+	views    viewCache
+	readers  chan *notmuch.Database
 }
 
 func New(cfg Config) (*Engine, error) {
 	e := &Engine{
-		view: view.Options{Alternatives: cfg.Alternatives, Raw: map[string]bool{}, Images: cfg.Images},
-		html: cfg.HTMLAlternative,
+		readers:  make(chan *notmuch.Database, runtime.GOMAXPROCS(0)),
+		view:     view.Options{Alternatives: cfg.Alternatives, Raw: map[string]bool{}, Images: cfg.Images},
+		html:     cfg.HTMLAlternative,
+		markdown: cfg.Markdown,
 	}
 	if len(e.view.Alternatives) == 0 {
 		e.view.Alternatives = []string{"text/html", "text/plain"}
@@ -172,14 +182,35 @@ func newAccount(number int, ac AccountConfig, root string) (*Account, error) {
 
 var errNoAccounts = errors.New("no accounts are configured")
 
+func (e *Engine) reader() (*notmuch.Database, error) {
+	select {
+	case db := <-e.readers:
+		if err := db.Reopen(); err == nil {
+			return db, nil
+		}
+		_ = db.Close()
+	default:
+	}
+	return notmuch.Open(notmuch.ReadOnly)
+}
+
+func (e *Engine) release(db *notmuch.Database) error {
+	select {
+	case e.readers <- db:
+		return nil
+	default:
+		return db.Close()
+	}
+}
+
 func (e *Engine) read(fn func(*notmuch.Database) error) error {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	db, err := notmuch.Open(notmuch.ReadOnly)
+	db, err := e.reader()
 	if err != nil {
 		return err
 	}
-	return errors.Join(fn(db), db.Close())
+	return errors.Join(fn(db), e.release(db))
 }
 
 func (e *Engine) write(fn func(*notmuch.Database) error) error {

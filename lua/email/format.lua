@@ -1,3 +1,5 @@
+local text = require("email.text")
+
 local M = {}
 
 local DAYS = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
@@ -25,22 +27,7 @@ function M.oneline(s)
   return vim.trim((s or ""):gsub("%s+", " "))
 end
 
-function M.fit(s, width)
-  local w = vim.fn.strdisplaywidth(s)
-  if w <= width then
-    return s .. string.rep(" ", width - w)
-  end
-  local out, used = {}, 0
-  for _, ch in ipairs(vim.fn.split(s, [[\zs]])) do
-    local cw = vim.fn.strdisplaywidth(ch)
-    if used + cw > width - 1 then
-      break
-    end
-    out[#out + 1] = ch
-    used = used + cw
-  end
-  return table.concat(out) .. "…" .. string.rep(" ", width - 1 - used)
-end
+M.fit = text.fit
 
 function M.status_icon(tags, icons)
   if tags.flagged then
@@ -55,11 +42,18 @@ function M.status_icon(tags, icons)
   return "", nil
 end
 
+local icon_widths = setmetatable({}, { __mode = "k" })
+
 local function icon_width(icons)
-  local width = 0
-  for _, icon in pairs(icons) do
-    width = math.max(width, vim.fn.strdisplaywidth(icon))
+  local width = icon_widths[icons]
+  if width then
+    return width
   end
+  width = 0
+  for _, icon in pairs(icons) do
+    width = math.max(width, text.width(icon))
+  end
+  icon_widths[icons] = width
   return width
 end
 
@@ -78,7 +72,7 @@ function M.row(message, width, icons, now, marked)
   segments[#segments + 1] = { badge .. "  ", "EmailCount" }
   local used = 0
   for _, segment in ipairs(segments) do
-    used = used + vim.fn.strdisplaywidth(segment[1])
+    used = used + text.width(segment[1])
   end
   local subject_width = math.max(10, width - used - DATE_WIDTH - 3)
   local subject = M.oneline(message.headers.Subject)
@@ -89,16 +83,16 @@ function M.row(message, width, icons, now, marked)
   local date = M.date(message.timestamp, now)
   segments[#segments + 1] = { string.rep(" ", DATE_WIDTH - #date) .. date .. " ", "EmailDate" }
 
-  local text, highlights = {}, {}
+  local parts, highlights = {}, {}
   local col = 0
   for _, segment in ipairs(segments) do
-    text[#text + 1] = segment[1]
+    parts[#parts + 1] = segment[1]
     if segment[2] then
       highlights[#highlights + 1] = { col, col + #segment[1], segment[2] }
     end
     col = col + #segment[1]
   end
-  return table.concat(text), highlights
+  return table.concat(parts), highlights
 end
 
 local FOLDER_ROLES = {

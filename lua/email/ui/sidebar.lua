@@ -1,5 +1,5 @@
 local format = require("email.format")
-local highlight = require("email.ui.highlight")
+local decorations = require("email.ui.decorations")
 local layout = require("email.ui.layout")
 local state = require("email.state")
 
@@ -101,10 +101,13 @@ function M.render()
   end
   state.sidebar_rows = rows
   layout.set_lines(buf, lines)
-  vim.api.nvim_buf_clear_namespace(buf, highlight.ns, 0, -1)
+  local decorated = decorations.rows()
   for row, hls in pairs(highlights) do
-    highlight.apply(buf, row - 1, hls)
+    for _, hl in ipairs(hls) do
+      decorations.span(decorated, row - 1, hl[1], hl[2], hl[3])
+    end
   end
+  decorations.set(buf, decorated)
   if active_row and state.win.sidebar and vim.api.nvim_win_is_valid(state.win.sidebar) then
     vim.api.nvim_win_set_cursor(state.win.sidebar, { active_row, 0 })
   end

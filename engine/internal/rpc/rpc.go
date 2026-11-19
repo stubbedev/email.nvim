@@ -11,8 +11,10 @@ import (
 	"sync"
 
 	"github.com/stubbedev/email.nvim/engine/internal/calendar"
+	"github.com/stubbedev/email.nvim/engine/internal/doc"
 	"github.com/stubbedev/email.nvim/engine/internal/engine"
 	"github.com/stubbedev/email.nvim/engine/internal/notmuch"
+	"github.com/stubbedev/email.nvim/engine/internal/view"
 )
 
 type request struct {
@@ -66,10 +68,6 @@ func method[P any, R any](fn func(ctx context.Context, e *engine.Engine, p P) (R
 
 type none struct{}
 
-type idParams struct {
-	ID string `json:"id"`
-}
-
 type idsParams struct {
 	IDs       []string `json:"ids"`
 	Preferred int      `json:"preferred"`
@@ -109,6 +107,18 @@ var handlers = map[string]handler{
 	}) (engine.ThreadPage, error) {
 		return e.Threads(p.Query, notmuch.NewestFirst, p.Offset, p.Limit, p.Count)
 	}),
+	"count_threads": method(func(_ context.Context, e *engine.Engine, p struct {
+		Query string `json:"query"`
+	}) (int, error) {
+		return e.CountThreads(p.Query)
+	}),
+	"prefetch": method(func(_ context.Context, e *engine.Engine, p struct {
+		Queries []string `json:"queries"`
+		Limit   int      `json:"limit"`
+	}) (bool, error) {
+		e.Prefetch(p.Queries, p.Limit)
+		return true, nil
+	}),
 	"newest_message": method(func(_ context.Context, e *engine.Engine, p struct {
 		Thread string `json:"thread"`
 		Query  string `json:"query"`
@@ -116,13 +126,30 @@ var handlers = map[string]handler{
 		return e.NewestMessage(p.Thread, p.Query)
 	}),
 	"message": method(func(_ context.Context, e *engine.Engine, p struct {
-		ID           string   `json:"id"`
-		Alternatives []string `json:"alternatives"`
+		ID           string         `json:"id"`
+		Alternatives []string       `json:"alternatives"`
+		Render       *engine.Render `json:"render"`
 	}) (engine.MessageView, error) {
-		return e.Message(p.ID, p.Alternatives)
+		return e.Message(p.ID, p.Alternatives, p.Render)
 	}),
-	"thread": method(func(_ context.Context, e *engine.Engine, p idParams) ([]engine.MessageView, error) {
-		return e.Thread(p.ID)
+	"thread": method(func(_ context.Context, e *engine.Engine, p struct {
+		ID     string         `json:"id"`
+		Render *engine.Render `json:"render"`
+	}) ([]engine.MessageView, error) {
+		return e.Thread(p.ID, p.Render)
+	}),
+	"warm": method(func(_ context.Context, e *engine.Engine, p struct {
+		IDs    []string       `json:"ids"`
+		Render *engine.Render `json:"render"`
+	}) (bool, error) {
+		e.Warm(p.IDs, p.Render)
+		return true, nil
+	}),
+	"render": method(func(_ context.Context, e *engine.Engine, p struct {
+		Blocks []view.Block  `json:"blocks"`
+		Render engine.Render `json:"render"`
+	}) (doc.Doc, error) {
+		return e.Layout(p.Blocks, p.Render)
 	}),
 	"tag": method(func(_ context.Context, e *engine.Engine, p struct {
 		IDs     []string `json:"ids"`

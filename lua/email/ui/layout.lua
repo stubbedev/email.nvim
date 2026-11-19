@@ -16,7 +16,8 @@ local PLAIN_WINDOW = {
 }
 
 local group = vim.api.nvim_create_augroup("email.nvim.layout", { clear = true })
-local spinner_timer, spinner_frame, spinner_label
+local SPINNER_DELAY, SPINNER_INTERVAL = 120, 80
+local spinner_timer, spinner_frame, spinner_label, spinner_running
 local bars = {}
 local saved_mouse
 
@@ -381,23 +382,25 @@ end
 function M.busy(label)
   state.busy = state.busy + 1
   spinner_label = label
-  if spinner_timer then
+  if spinner_running then
     return
   end
+  spinner_timer = spinner_timer or assert(vim.uv.new_timer())
   spinner_frame = 0
-  local timer = assert(vim.uv.new_timer())
-  timer:start(0, 80, vim.schedule_wrap(draw_spinner))
-  spinner_timer = timer
+  spinner_running = true
+  spinner_timer:start(SPINNER_DELAY, SPINNER_INTERVAL, vim.schedule_wrap(draw_spinner))
 end
 
 function M.idle()
   state.busy = math.max(0, state.busy - 1)
-  if state.busy > 0 or not spinner_timer then
+  if state.busy > 0 or not spinner_running then
     return
   end
   spinner_timer:stop()
-  spinner_timer:close()
-  spinner_timer = nil
+  spinner_running = false
+  if spinner_frame == 0 then
+    return
+  end
   M.set_status("sidebar", nil, nil)
   if state.reading then
     M.set_status("reader", nil, state.reader_footer)

@@ -1,15 +1,14 @@
 local async = require("email.async")
 local compose = require("email.compose")
 local composer = require("email.ui.composer")
+local document = require("email.document")
 local engine = require("email.engine")
 local format = require("email.format")
 local help = require("email.ui.help")
 local images = require("email.images")
 local layout = require("email.ui.layout")
 local list = require("email.ui.list")
-local markdown = require("email.markdown")
 local reader = require("email.ui.reader")
-local render = require("email.render")
 local sidebar = require("email.ui.sidebar")
 local state = require("email.state")
 
@@ -79,31 +78,64 @@ function M.refresh_counts()
   sidebar.render()
 end
 
+function M.prefetch()
+  local queries = {}
+  for i, folder in ipairs(sidebar.folders()) do
+    queries[i] = folder.query
+  end
+  engine.prefetch(queries, state.config.page_size)
+end
+
 function M.load_list(keep_id)
   state.load_generation = state.load_generation + 1
   local generation = state.load_generation
-  local threads, total = engine.threads(query(), 0, math.max(state.config.page_size, #state.threads), true)
+  local q = query()
+  local limit = math.max(state.config.page_size, #state.threads)
+  async.run(function()
+    local total = engine.count_threads(q)
+    if generation == state.load_generation then
+      state.total = total
+      list.chrome()
+    end
+  end)
+  local threads = engine.threads(q, 0, limit)
   if generation ~= state.load_generation or not layout.is_open() then
     return
   end
-  state.total = total
+  state.exhausted = #threads < limit
   state.threads = threads
   list.render(keep_id)
+  M.warm_visible()
+end
+
+function M.warm_visible()
+  local win = state.win.list
+  if not win or not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+  local ids = {}
+  for i = 1, math.min(#state.threads, vim.api.nvim_win_get_height(win)) do
+    ids[i] = state.threads[i].id
+  end
+  if #ids > 0 then
+    engine.warm(ids, { width = layout.reader_width() })
+  end
 end
 
 local SCROLL_AHEAD = 20
 
 function M.load_more()
-  if state.loading_more or #state.threads >= state.total then
+  if state.loading_more or state.exhausted then
     return
   end
   state.loading_more = true
   local generation = state.load_generation
   local ok, err = pcall(function()
-    local threads = engine.threads(query(), #state.threads, state.config.page_size, false)
+    local threads = engine.threads(query(), #state.threads, state.config.page_size)
     if generation ~= state.load_generation or not layout.is_open() then
       return
     end
+    state.exhausted = #threads < state.config.page_size
     local known = {}
     for _, thread in ipairs(state.threads) do
       known[thread.id] = true
@@ -113,7 +145,7 @@ function M.load_more()
         state.threads[#state.threads + 1] = thread
       end
     end
-    list.render()
+    list.append()
   end)
   state.loading_more = false
   if not ok then
@@ -221,10 +253,9 @@ local function invite_of(message)
   return calendar and { summary = calendar.summary, method = calendar.method }
 end
 
-local function render_message(message)
+local function render_message(message, render)
   local config = state.config
-  local segments = render.segments(message, config.renderers, config.markdown.types)
-  local doc = markdown.render(segments, layout.reader_width(), config.markdown)
+  local doc = document.of(message, render)
   if config.images.enabled then
     images.append_attachments(message, doc, config.markdown.image)
     images.pad_end(doc)
@@ -235,8 +266,9 @@ end
 local function show(thread)
   local entries, unread, buf = {}, {}, nil
   layout.with_busy("Opening", function()
-    for _, message in ipairs(engine.thread(thread.id)) do
-      entries[#entries + 1] = { message = message, doc = render_message(message), invite = invite_of(message) }
+    local render = { width = layout.reader_width() }
+    for _, message in ipairs(engine.thread(thread.id, render)) do
+      entries[#entries + 1] = { message = message, doc = render_message(message, render), invite = invite_of(message) }
       if message.tags.unread then
         unread[#unread + 1] = message.id
       end
@@ -266,7 +298,10 @@ local function show(thread)
       entry.message.tags.unread = nil
     end
     thread.tags.unread = nil
-    list.render()
+    local index = list.index_of(thread.id)
+    if index then
+      list.update({ index })
+    end
     M.refresh_counts()
   end
   if #pending > 0 and state.thread == thread.id then
@@ -276,7 +311,7 @@ end
 
 local function set_folder(folder)
   state.folder = folder
-  state.threads = {}
+  state.threads, state.total, state.exhausted = {}, nil, false
   state.marked = {}
   if state.reading then
     layout.close_reader()
@@ -512,11 +547,13 @@ M.handlers = {
   mark = function()
     if in_visual() then
       local first, last = visual_rows()
+      local rows = {}
       for row = first, last do
         local thread = state.threads[row]
         state.marked[thread.id] = not state.marked[thread.id] or nil
+        rows[#rows + 1] = row
       end
-      list.render()
+      list.update(rows)
       return
     end
     local thread = list.selected()
@@ -525,7 +562,7 @@ M.handlers = {
     end
     state.marked[thread.id] = not state.marked[thread.id] or nil
     local row = vim.api.nvim_win_get_cursor(state.win.list)[1]
-    list.render()
+    list.update({ row })
     vim.api.nvim_win_set_cursor(state.win.list, { math.min(row + 1, math.max(1, #state.threads)), 0 })
   end,
   mark_all = function()
@@ -756,6 +793,7 @@ function M.start_polling()
             state.lastmod = lastmod
             M.refresh_counts()
             M.load_list()
+            M.prefetch()
           end
         end)
         state.polling = false

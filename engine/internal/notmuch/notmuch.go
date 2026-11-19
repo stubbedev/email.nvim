@@ -238,32 +238,60 @@ func messageOf(m *C.notmuch_message_t) (Message, error) {
 	}, nil
 }
 
-func (d *Database) Threads(text string, sort Sort, offset, limit int) ([]Thread, error) {
+type ThreadIter struct {
+	q       *query
+	threads *C.notmuch_threads_t
+	text    string
+}
+
+func (d *Database) ThreadIter(text string, sort Sort) (*ThreadIter, error) {
 	q, err := d.query(text, sort, C.NOTMUCH_EXCLUDE_TRUE)
 	if err != nil {
 		return nil, err
 	}
-	defer q.close()
-	var threads *C.notmuch_threads_t
-	if err := statusError(fmt.Sprintf("search threads %q", text), C.notmuch_query_search_threads(q.q, &threads)); err != nil {
+	it := &ThreadIter{q: q, text: text}
+	if err := statusError(fmt.Sprintf("search threads %q", text), C.notmuch_query_search_threads(q.q, &it.threads)); err != nil {
+		q.close()
 		return nil, err
 	}
-	defer C.notmuch_threads_destroy(threads)
+	return it, nil
+}
+
+func (it *ThreadIter) Skip(n int) {
+	for ; n > 0 && C.notmuch_threads_valid(it.threads) != 0; n-- {
+		C.notmuch_thread_destroy(C.notmuch_threads_get(it.threads))
+		C.notmuch_threads_move_to_next(it.threads)
+	}
+}
+
+func (it *ThreadIter) Next(limit int) ([]Thread, error) {
 	out := make([]Thread, 0, limit)
-	for index := 0; C.notmuch_threads_valid(threads) != 0 && len(out) < limit; index++ {
-		thread := C.notmuch_threads_get(threads)
-		if index >= offset {
-			t, err := threadOf(thread)
-			if err != nil {
-				C.notmuch_thread_destroy(thread)
-				return nil, err
-			}
-			out = append(out, t)
-		}
+	for len(out) < limit && C.notmuch_threads_valid(it.threads) != 0 {
+		thread := C.notmuch_threads_get(it.threads)
+		t, err := threadOf(thread)
 		C.notmuch_thread_destroy(thread)
-		C.notmuch_threads_move_to_next(threads)
+		if err != nil {
+			return nil, fmt.Errorf("search threads %q: %w", it.text, err)
+		}
+		out = append(out, t)
+		C.notmuch_threads_move_to_next(it.threads)
 	}
 	return out, nil
+}
+
+func (it *ThreadIter) Close() {
+	C.notmuch_threads_destroy(it.threads)
+	it.q.close()
+}
+
+func (d *Database) Threads(text string, sort Sort, offset, limit int) ([]Thread, error) {
+	it, err := d.ThreadIter(text, sort)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	it.Skip(offset)
+	return it.Next(limit)
 }
 
 func joinAuthors(raw string) string {
@@ -534,4 +562,8 @@ func (d *Database) Remove(path string) error {
 		return nil
 	}
 	return statusError("remove "+path, status)
+}
+
+func (d *Database) Reopen() error {
+	return statusError("reopen database", C.notmuch_database_reopen(d.db, C.NOTMUCH_DATABASE_MODE_READ_ONLY))
 }

@@ -136,7 +136,7 @@ func addTools(s *mcp.Server, e *engine.Engine) {
 		for i, v := range views {
 			body := text(v.Blocks)
 			if a.IncludeHTML {
-				html, err := e.Message(v.ID, htmlFirst)
+				html, err := e.Message(v.ID, htmlFirst, nil)
 				if err != nil {
 					return nil, nil, err
 				}

@@ -7,7 +7,7 @@ local STDERR_TAIL = 4096
 
 local root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":p:h:h:h")
 local process
-local pending, next_id, partial, stderr = {}, 0, "", ""
+local pending, next_id, partial, stderr = {}, 0, {}, ""
 local starting = async.mutex()
 
 local function read_file(path)
@@ -52,17 +52,27 @@ local function on_stdout(_, data)
   if not data then
     return
   end
-  partial = partial .. data
-  local lines = {}
-  for line in partial:gmatch("([^\n]*)\n") do
-    lines[#lines + 1] = line
-  end
-  partial = partial:match("[^\n]*$")
-  vim.schedule(function()
-    for _, line in ipairs(lines) do
-      on_line(line)
+  local lines, start = {}, 1
+  while true do
+    local newline = data:find("\n", start, true)
+    if not newline then
+      break
     end
-  end)
+    partial[#partial + 1] = data:sub(start, newline - 1)
+    lines[#lines + 1] = table.concat(partial)
+    partial = {}
+    start = newline + 1
+  end
+  if start <= #data then
+    partial[#partial + 1] = data:sub(start)
+  end
+  if #lines > 0 then
+    vim.schedule(function()
+      for _, line in ipairs(lines) do
+        on_line(line)
+      end
+    end)
+  end
 end
 
 local function on_stderr(_, data)
@@ -121,8 +131,18 @@ local function configuration()
   for i, account in ipairs(config.accounts) do
     accounts[i] = account_payload(account)
   end
+  local markdown = config.markdown
   return {
     accounts = accounts,
+    markdown = {
+      types = markdown.types,
+      headings = markdown.headings,
+      bullets = markdown.bullets,
+      quote = markdown.quote,
+      link = markdown.link,
+      email = markdown.email,
+      image = markdown.image,
+    },
     alternatives = config.alternatives,
     raw_types = raw,
     images = config.images.enabled,
@@ -132,7 +152,7 @@ end
 
 local function start()
   local path = binary()
-  partial, stderr = "", ""
+  partial, stderr = {}, ""
   local spawned
   spawned = vim.system({ path, "serve" }, { stdin = true, stdout = on_stdout, stderr = on_stderr }, function(res)
     vim.schedule(function()
@@ -207,9 +227,16 @@ local function thread(summary)
   }
 end
 
-function M.threads(query, offset, limit, count)
-  local page = M.call("threads", { query = query, offset = offset, limit = limit, count = count })
-  return vim.tbl_map(thread, page.threads or {}), page.total
+function M.threads(query, offset, limit)
+  return vim.tbl_map(thread, M.call("threads", { query = query, offset = offset, limit = limit }).threads or {})
+end
+
+function M.count_threads(query)
+  return M.call("count_threads", { query = query })
+end
+
+function M.prefetch(queries, limit)
+  M.call("prefetch", { queries = queries, limit = limit })
 end
 
 function M.counts(queries)
@@ -224,12 +251,20 @@ function M.newest_message(thread_id, query)
   return M.call("newest_message", { thread = thread_id, query = query })
 end
 
-function M.message(id, alternatives)
-  return message(M.call("message", { id = id, alternatives = alternatives }))
+function M.message(id, alternatives, render)
+  return message(M.call("message", { id = id, alternatives = alternatives, render = render }))
 end
 
-function M.thread(id)
-  return vim.tbl_map(message, M.call("thread", { id = id }))
+function M.thread(id, render)
+  return vim.tbl_map(message, M.call("thread", { id = id, render = render }))
+end
+
+function M.warm(ids, render)
+  M.call("warm", { ids = ids, render = render })
+end
+
+function M.render(blocks, render)
+  return M.call("render", { blocks = blocks, render = render })
 end
 
 function M.tag(ids, changes)

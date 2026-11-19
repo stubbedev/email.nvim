@@ -1,14 +1,17 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/stubbedev/email.nvim/engine/internal/doc"
 	"github.com/stubbedev/email.nvim/engine/internal/mailtest"
 	"github.com/stubbedev/email.nvim/engine/internal/message"
+	"github.com/stubbedev/email.nvim/engine/internal/notmuch"
 	"github.com/stubbedev/email.nvim/engine/internal/smtp"
 	"github.com/stubbedev/email.nvim/engine/internal/smtp/smtptest"
 )
@@ -64,7 +67,7 @@ func TestThreadsCountsAndConversations(t *testing.T) {
 	if err != nil || newest != "p2@example.org" {
 		t.Errorf("newest = %q %v", newest, err)
 	}
-	conversation, err := e.Thread(plans.ID)
+	conversation, err := e.Thread(plans.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +85,7 @@ func TestTagSyncsMaildirFlagsAndBumpsTheRevision(t *testing.T) {
 	if err := e.Tag([]string{"p1@example.org"}, []string{"-unread", "+flagged"}); err != nil {
 		t.Fatal(err)
 	}
-	m, err := e.Message("p1@example.org", nil)
+	m, err := e.Message("p1@example.org", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,14 +106,14 @@ func TestArchiveDeleteAndUndo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, _ := e.Message("p1@example.org", nil)
+	m, _ := e.Message("p1@example.org", nil, nil)
 	if len(m.Files) != 1 || !strings.Contains(m.Files[0], filepath.Join("acct", "Archive", "cur")) || slices.Contains(m.Tags, "inbox") {
 		t.Fatalf("archived = %+v", m)
 	}
 	if err := e.Undo(undo); err != nil {
 		t.Fatal(err)
 	}
-	m, _ = e.Message("p1@example.org", nil)
+	m, _ = e.Message("p1@example.org", nil, nil)
 	if len(m.Files) != 1 || !strings.Contains(m.Files[0], filepath.Join("acct", "INBOX", "cur")) || !slices.Contains(m.Tags, "inbox") {
 		t.Fatalf("restored = %+v", m)
 	}
@@ -129,13 +132,13 @@ func TestArchiveDeleteAndUndo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Message("news@example.org", nil); err == nil {
+	if _, err := e.Message("news@example.org", nil, nil); err == nil {
 		t.Fatal("the deleted message is still indexed")
 	}
 	if err := e.Undo(undo); err != nil {
 		t.Fatal(err)
 	}
-	if m, err := e.Message("news@example.org", nil); err != nil || !strings.Contains(m.Files[0], filepath.Join("acct", "Trash")) {
+	if m, err := e.Message("news@example.org", nil, nil); err != nil || !strings.Contains(m.Files[0], filepath.Join("acct", "Trash")) {
 		t.Errorf("undeleted = %+v %v", m, err)
 	}
 
@@ -157,7 +160,7 @@ func TestFailedRelocateRollsBack(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the move into a broken folder to fail")
 	}
-	m, _ := e.Message("p1@example.org", nil)
+	m, _ := e.Message("p1@example.org", nil, nil)
 	if !strings.Contains(m.Files[0], filepath.Join("acct", "INBOX")) || !slices.Contains(m.Tags, "inbox") {
 		t.Errorf("not rolled back: %+v", m)
 	}
@@ -188,7 +191,7 @@ func TestDraftsAndSending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved, err := e.Message(id, nil)
+	saved, err := e.Message(id, nil, nil)
 	if err != nil || !slices.Contains(saved.Tags, "draft") || slices.Contains(saved.Tags, "unread") || !strings.Contains(saved.Files[0], filepath.Join("acct", "Drafts", "cur")) {
 		t.Fatalf("draft = %+v %v", saved, err)
 	}
@@ -206,14 +209,14 @@ func TestDraftsAndSending(t *testing.T) {
 	if len(wire) != 1 || strings.Contains(wire[0], "hidden@example.org") || !strings.Contains(wire[0], "text/html") {
 		t.Errorf("wire message:\n%v", wire)
 	}
-	if _, err := e.Message(id, nil); err == nil {
+	if _, err := e.Message(id, nil, nil); err == nil {
 		t.Error("the draft survived sending")
 	}
 	if counts, _ := e.Counts([]string{"tag:sent and subject:Lunch", "tag:replied and id:p1@example.org", "tag:draft"}); !slices.Equal(counts, []int{1, 1, 0}) {
 		t.Errorf("counts after send = %v", counts)
 	}
 	page, _ := e.Threads("tag:sent and subject:Lunch", 0, 0, 1, false)
-	sent, err := e.Message(page.Threads[0].MessageIDs[0], nil)
+	sent, err := e.Message(page.Threads[0].MessageIDs[0], nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +246,7 @@ func TestExtract(t *testing.T) {
 		"--b--", "",
 	}, "\n"))
 	mail.Index(t)
-	m, err := e.Message("f@example.org", nil)
+	m, err := e.Message("f@example.org", nil, nil)
 	if err != nil || len(m.Attachments) != 1 || m.Attachments[0].Part != 3 {
 		t.Fatalf("message = %+v %v", m, err)
 	}
@@ -271,7 +274,7 @@ func TestCalendarReply(t *testing.T) {
 		"--b--", "",
 	}, "\n"))
 	mail.Index(t)
-	m, err := e.Message("inv@example.org", nil)
+	m, err := e.Message("inv@example.org", nil, nil)
 	if err != nil || len(m.Calendars) != 1 || m.Calendars[0].Method != "REQUEST" || m.Calendars[0].Summary != "Team sync" {
 		t.Fatalf("calendars = %+v %v", m.Calendars, err)
 	}
@@ -287,5 +290,100 @@ func TestCalendarReply(t *testing.T) {
 	}
 	if _, err := e.CalendarReply("p1@example.org", "ACCEPTED", 0); err == nil {
 		t.Error("a message without an invite must be rejected")
+	}
+}
+
+func TestPagingCachingAndPrefetch(t *testing.T) {
+	mail, e := fixture(t)
+	for i := range 7 {
+		mail.Write(t, fmt.Sprintf("INBOX/new/20%02d.x", i), mailtest.Message(fmt.Sprintf("bulk%d@example.org", i), ann, "me@example.com", fmt.Sprintf("Bulk %d", i), fmt.Sprintf("Fri, 20 Nov 2026 10:%02d:00 +0000", i), "x"))
+	}
+	mail.Index(t)
+	const q = "folder:acct/INBOX"
+	var paged []string
+	for offset := 0; ; offset += 3 {
+		page, err := e.Threads(q, notmuch.NewestFirst, offset, 3, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, th := range page.Threads {
+			paged = append(paged, th.ID)
+		}
+		if len(page.Threads) < 3 {
+			break
+		}
+	}
+	whole, err := e.Threads(q, notmuch.NewestFirst, 0, 100, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all []string
+	for _, th := range whole.Threads {
+		all = append(all, th.ID)
+	}
+	if !slices.Equal(paged, all) || *whole.Total != len(all) {
+		t.Fatalf("cursor pages %v, one page %v (total %d)", paged, all, *whole.Total)
+	}
+
+	if err := e.Tag([]string{"bulk0@example.org"}, []string{"-inbox"}); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := e.CountThreads("tag:inbox and folder:acct/INBOX"); n != len(all)-1 {
+		t.Errorf("count after a write = %d, want %d (stale cache)", n, len(all)-1)
+	}
+	page, _ := e.Threads(q, notmuch.NewestFirst, 0, 100, false)
+	if !slices.ContainsFunc(page.Threads, func(th ThreadSummary) bool {
+		return slices.Contains(th.MessageIDs, "bulk0@example.org") && !slices.Contains(th.Tags, "inbox")
+	}) {
+		t.Errorf("first page after a write still shows old tags")
+	}
+
+	<-e.Prefetch([]string{"folder:acct/Sent"}, 50)
+	revision, _ := e.Revision()
+	if _, ok := e.cache.get(pageKey("folder:acct/Sent", notmuch.NewestFirst, 50), revision); !ok {
+		t.Error("prefetch did not cache the first page")
+	}
+	if _, ok := e.cache.get(countKey("folder:acct/Sent"), revision); !ok {
+		t.Error("prefetch did not cache the count")
+	}
+}
+
+func TestRenderedDocsAndTheViewCache(t *testing.T) {
+	_, e := fixture(t)
+	e.markdown = doc.Options{Headings: []string{"# "}, Bullets: []string{"*"}, Quote: "|", Link: "L ", Email: "E ", Image: "I ", Types: []string{"text/html", "text/plain"}}
+	r := &Render{Width: 40}
+	page, err := e.Threads("folder:acct/INBOX", notmuch.NewestFirst, 0, 10, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(page.Threads, func(th ThreadSummary) bool { return slices.Contains(th.MessageIDs, "p1@example.org") })
+	views, err := e.Thread(page.Threads[i].ID, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans := views[0]
+	if plans.Doc == nil || !slices.Equal(plans.Doc.Lines, []string{"first"}) || !slices.Contains(plans.HeaderLines, "Subject: Plans") {
+		t.Fatalf("view = %+v", plans)
+	}
+	if err := e.Tag([]string{"p1@example.org"}, []string{"+flagged"}); err != nil {
+		t.Fatal(err)
+	}
+	again, err := e.Message("p1@example.org", nil, r)
+	if err != nil || !slices.Contains(again.Tags, "flagged") || again.Doc == nil {
+		t.Errorf("a cached view lost fresh tags: %+v %v", again, err)
+	}
+	quoted, _ := e.Message("p1@example.org", nil, &Render{Width: 72, InlineURLs: true})
+	if quoted.Doc == nil || quoted.Doc == again.Doc {
+		t.Error("different render options must not share a cached doc")
+	}
+	e.view.Raw = map[string]bool{"text/plain": true}
+	e.views = viewCache{}
+	raw, _ := e.Message("p1@example.org", nil, r)
+	if raw.Doc != nil {
+		t.Error("a message with a client-rendered type must leave rendering to the client")
+	}
+	laid, err := e.Layout(raw.Blocks, *r)
+	if err != nil || !slices.Equal(laid.Lines, []string{"first"}) {
+		t.Errorf("layout = %+v %v", laid, err)
 	}
 }

@@ -24,7 +24,7 @@ func (e *Engine) Matching(query string, limit int, entireThread bool, alternativ
 		}
 		views = make([]MessageView, 0, len(found))
 		for _, m := range found {
-			v, err := e.viewOf(m, opts)
+			v, err := e.viewOf(m, opts, nil)
 			if err != nil {
 				return err
 			}

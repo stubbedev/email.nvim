@@ -8,10 +8,12 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/stubbedev/email.nvim/engine/internal/compose"
+	"github.com/stubbedev/email.nvim/engine/internal/doc"
 	"github.com/stubbedev/email.nvim/engine/internal/message"
 	"github.com/stubbedev/email.nvim/engine/internal/notmuch"
 	"github.com/stubbedev/email.nvim/engine/internal/view"
@@ -33,20 +35,26 @@ type ThreadPage struct {
 }
 
 type MessageView struct {
-	ID        string   `json:"id"`
-	Timestamp int64    `json:"timestamp"`
-	Tags      []string `json:"tags"`
-	Files     []string `json:"files"`
-	Accounts  []int    `json:"accounts"`
-	Sender    string   `json:"sender"`
+	ID          string   `json:"id"`
+	Timestamp   int64    `json:"timestamp"`
+	Tags        []string `json:"tags"`
+	Files       []string `json:"files"`
+	Accounts    []int    `json:"accounts"`
+	Sender      string   `json:"sender"`
+	HeaderLines []string `json:"header_lines"`
+	Doc         *doc.Doc `json:"doc,omitempty"`
 	view.View
+}
+
+func revisionOf(db *notmuch.Database) string {
+	revision, uuid := db.Revision()
+	return uuid + ":" + strconv.FormatUint(revision, 10)
 }
 
 func (e *Engine) Revision() (string, error) {
 	var out string
 	err := e.read(func(db *notmuch.Database) error {
-		revision, uuid := db.Revision()
-		out = fmt.Sprintf("%s:%d", uuid, revision)
+		out = revisionOf(db)
 		return nil
 	})
 	return out, err
@@ -55,41 +63,22 @@ func (e *Engine) Revision() (string, error) {
 func (e *Engine) Counts(queries []string) ([]int, error) {
 	out := make([]int, len(queries))
 	err := e.read(func(db *notmuch.Database) error {
+		key := revisionOf(db)
 		for i, q := range queries {
+			if value, ok := e.cache.get("messages\x00"+q, key); ok {
+				out[i] = value.(int)
+				continue
+			}
 			n, err := db.CountMessages(q)
 			if err != nil {
 				return err
 			}
+			e.cache.put("messages\x00"+q, key, n)
 			out[i] = n
 		}
 		return nil
 	})
 	return out, err
-}
-
-func (e *Engine) Threads(query string, sort notmuch.Sort, offset, limit int, count bool) (ThreadPage, error) {
-	page := ThreadPage{Threads: []ThreadSummary{}}
-	err := e.read(func(db *notmuch.Database) error {
-		if count {
-			total, err := db.CountThreads(query)
-			if err != nil {
-				return err
-			}
-			page.Total = &total
-		}
-		threads, err := db.Threads(query, sort, offset, limit)
-		if err != nil {
-			return err
-		}
-		for _, t := range threads {
-			page.Threads = append(page.Threads, ThreadSummary{
-				ID: t.ID, Timestamp: t.Newest, Total: t.Total, Authors: t.Authors,
-				Subject: t.Subject, Tags: t.Tags, MessageIDs: t.MatchedIDs,
-			})
-		}
-		return nil
-	})
-	return page, err
 }
 
 func (e *Engine) NewestMessage(thread, query string) (string, error) {
@@ -126,24 +115,47 @@ func load(m notmuch.Message) (*message.Message, error) {
 	return nil, fmt.Errorf("message %s: no readable file: %w", m.ID, errors.Join(errs...))
 }
 
-func (e *Engine) viewOf(m notmuch.Message, opts view.Options) (MessageView, error) {
-	parsed, err := load(m)
-	if err != nil {
-		return MessageView{}, err
-	}
-	return e.present(m, parsed, opts), nil
-}
-
-func (e *Engine) present(m notmuch.Message, parsed *message.Message, opts view.Options) MessageView {
+func (e *Engine) viewOf(m notmuch.Message, opts view.Options, r *Render) (MessageView, error) {
 	accounts := []int{}
 	for _, account := range e.owners(m.Files) {
 		accounts = append(accounts, account.Number)
 	}
-	sender := "(unknown)"
-	if from := parsed.Addresses("From"); len(from) > 0 {
-		sender = cmp.Or(from[0].Name, from[0].Address)
+	key := ""
+	if len(m.Files) > 0 {
+		key = viewKey(m.Files[0], opts, r)
 	}
-	return MessageView{ID: m.ID, Timestamp: m.Date, Tags: m.Tags, Files: m.Files, Accounts: accounts, Sender: sender, View: view.Build(parsed, opts)}
+	entry, ok := e.views.get(key)
+	if !ok {
+		parsed, err := load(m)
+		if err != nil {
+			return MessageView{}, err
+		}
+		if entry, err = e.render(parsed, opts, r); err != nil {
+			return MessageView{}, err
+		}
+		e.views.put(key, entry)
+	}
+	return MessageView{
+		ID: m.ID, Timestamp: m.Date, Tags: m.Tags, Files: m.Files, Accounts: accounts,
+		Sender: entry.sender, HeaderLines: entry.headerLines, Doc: entry.doc, View: entry.view,
+	}, nil
+}
+
+func (e *Engine) render(parsed *message.Message, opts view.Options, r *Render) (renderedView, error) {
+	entry := renderedView{sender: "(unknown)", view: view.Build(parsed, opts)}
+	if from := parsed.Addresses("From"); len(from) > 0 {
+		entry.sender = cmp.Or(from[0].Name, from[0].Address)
+	}
+	entry.headerLines = headerLines(entry.view.Headers)
+	if r != nil && e.renderable(entry.view.Blocks) {
+		rendered, err := e.layout(entry.view.Blocks, *r)
+		if err != nil {
+			return renderedView{}, err
+		}
+		entry.doc = &rendered
+	}
+	entry.size = sizeOf(entry.view, entry.doc)
+	return entry, nil
 }
 
 func (e *Engine) options(alternatives []string) view.Options {
@@ -168,15 +180,30 @@ func (e *Engine) open(id string) (notmuch.Message, *message.Message, error) {
 	return m, parsed, err
 }
 
-func (e *Engine) Message(id string, alternatives []string) (MessageView, error) {
-	m, parsed, err := e.open(id)
-	if err != nil {
-		return MessageView{}, err
-	}
-	return e.present(m, parsed, e.options(alternatives)), nil
+func (e *Engine) Message(id string, alternatives []string, r *Render) (MessageView, error) {
+	var v MessageView
+	err := e.read(func(db *notmuch.Database) error {
+		m, err := db.Message(id)
+		if err != nil {
+			return err
+		}
+		v, err = e.viewOf(m, e.options(alternatives), r)
+		return err
+	})
+	return v, err
 }
 
-func (e *Engine) Thread(id string) ([]MessageView, error) {
+func (e *Engine) Warm(ids []string, r *Render) {
+	go func() {
+		for _, id := range ids {
+			if _, err := e.Thread(id, r); err != nil {
+				fmt.Fprintf(os.Stderr, "email-engine: warming thread %s: %v\n", id, err)
+			}
+		}
+	}()
+}
+
+func (e *Engine) Thread(id string, r *Render) ([]MessageView, error) {
 	var views []MessageView
 	err := e.read(func(db *notmuch.Database) error {
 		messages, err := db.Messages("thread:"+id, notmuch.OldestFirst, 0)
@@ -193,7 +220,7 @@ func (e *Engine) Thread(id string) ([]MessageView, error) {
 		for range min(runtime.GOMAXPROCS(0), len(messages)) {
 			wg.Go(func() {
 				for i := range jobs {
-					views[i], errs[i] = e.viewOf(messages[i], e.view)
+					views[i], errs[i] = e.viewOf(messages[i], e.view, r)
 				}
 			})
 		}

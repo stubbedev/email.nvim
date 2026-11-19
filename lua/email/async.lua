@@ -1,6 +1,8 @@
 local M = {}
 
 local steppers = setmetatable({}, { __mode = "k" })
+local SLICE_NS = 8e6
+local slice_start = vim.uv.hrtime()
 
 local function pack(...)
   return { n = select("#", ...), ... }
@@ -9,6 +11,7 @@ end
 function M.run(fn, ...)
   local co = coroutine.create(fn)
   local function step(...)
+    slice_start = vim.uv.hrtime()
     local ok, err = coroutine.resume(co, ...)
     if not ok then
       vim.notify("email.nvim: " .. tostring(err), vim.log.levels.ERROR)
@@ -40,6 +43,16 @@ function M.await(start)
   end
   yielded = true
   return coroutine.yield()
+end
+
+function M.pause()
+  local co = coroutine.running()
+  if not (co and steppers[co]) or vim.uv.hrtime() - slice_start < SLICE_NS then
+    return
+  end
+  M.await(function(resolve)
+    vim.schedule(resolve)
+  end)
 end
 
 function M.mutex()

@@ -251,7 +251,7 @@ func (e *Engine) CalendarReply(id string, status calendar.PartStat, preferred in
 	if !ok {
 		return CalendarDraft{}, fmt.Errorf("unknown participation status %q", status)
 	}
-	m, err := e.Message(id, nil)
+	m, err := e.Message(id, nil, nil)
 	if err != nil {
 		return CalendarDraft{}, err
 	}

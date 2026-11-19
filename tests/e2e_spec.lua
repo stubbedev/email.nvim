@@ -474,7 +474,7 @@ describe("e2e: scrolling near the end of the list loads the next batch", functio
   state.config.page_size = 2
   vim.cmd("EmailSearch *")
   wait("the first batch", function()
-    return state.busy == 0 and #state.threads == 2 and state.total > 3
+    return state.busy == 0 and #state.threads == 2 and state.total ~= nil and state.total > 3
   end)
   local total = state.total
   focus_row(2)

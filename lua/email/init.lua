@@ -25,11 +25,12 @@ function M.open(search, open_first)
     actions.bind(state.buf.sidebar, { "global", "sidebar" })
   end
   if search then
-    state.folder, state.threads = { search = search }, {}
+    state.folder, state.threads, state.total, state.exhausted = { search = search }, {}, nil, false
   end
   async.run(function()
     actions.reload()
     state.lastmod = engine.revision()
+    actions.prefetch()
     actions.start_polling()
     if open_first then
       if #state.threads == 0 then

@@ -1,5 +1,6 @@
 local state = {}
-state.total = 0
+state.total = nil
+state.exhausted = false
 state.threads = {}
 state.marked = {}
 state.unread = {}
