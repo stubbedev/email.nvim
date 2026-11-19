@@ -26,6 +26,7 @@ type prop struct {
 	name   string
 	params [][2]string
 	value  string
+	raw    string
 }
 
 // param looks a parameter up case-insensitively, first-wins like producers
@@ -170,7 +171,7 @@ func parseProp(line string) *prop {
 		}
 		params = append(params, [2]string{strings.ToUpper(strings.TrimSpace(k)), v})
 	}
-	return &prop{name: name, params: params, value: value}
+	return &prop{name: name, params: params, value: value, raw: line}
 }
 
 // splitUnquotedSemicolons splits on `;` outside quoted parameter values

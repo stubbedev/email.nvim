@@ -3,8 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
-	"strings"
 
 	"github.com/stubbedev/email.nvim/engine/internal/calendar"
 	"github.com/stubbedev/email.nvim/engine/internal/convert"
@@ -12,13 +10,14 @@ import (
 	"github.com/stubbedev/email.nvim/engine/internal/plain"
 )
 
-const convertUsage = `usage: email-engine convert [--html | --plain | --calendar] [--images]
+const convertUsage = `usage: email-engine convert [--html [--images] | --plain [--flowed] | --calendar]
        email-engine convert --to-html
 
   --html      force the HTML pipeline (vendor-noisy HTML → Markdown)
   --images    keep content images as ![alt](src) (cid:, data:image and http(s)
               sources; tracking pixels and spacers are still dropped)
-  --plain     dewrap RFC 3676 format=flowed (FORMAT=flowed); passthrough otherwise
+  --plain     a text/plain part, passed through
+  --flowed    with --plain: the part is format=flowed (RFC 3676), so dewrap it
   --calendar  render an iCalendar part (invites, todos)
   (no flag)   auto-detect: BEGIN:VCALENDAR → calendar, HTML markers → html, else plain
   --to-html   the reverse: render Markdown (an outgoing message body) as an HTML
@@ -28,7 +27,7 @@ const convertUsage = `usage: email-engine convert [--html | --plain | --calendar
 func runConvert(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var mode convert.Format
 	var opts convert.Options
-	haveMode, toHTML := false, false
+	haveMode, toHTML, flowed := false, false, false
 	for _, arg := range args {
 		switch arg {
 		case "--html":
@@ -41,6 +40,8 @@ func runConvert(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			opts.Images = true
 		case "--to-html":
 			toHTML = true
+		case "--flowed":
+			flowed = true
 		case "-h", "--help":
 			_, _ = fmt.Fprint(stdout, convertUsage)
 			return 0
@@ -57,7 +58,7 @@ func runConvert(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	input := string(raw)
 	var out string
 	switch {
-	case toHTML && (haveMode || opts.Images):
+	case toHTML && (haveMode || opts.Images || flowed):
 		_, _ = fmt.Fprintf(stderr, "email-engine convert: --to-html takes no other flags\n\n%s", convertUsage)
 		return 2
 	case toHTML:
@@ -74,7 +75,7 @@ func runConvert(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		case convert.Html:
 			out = convert.Convert(input, opts)
 		case convert.Plain:
-			out = plain.Render(input, strings.EqualFold(os.Getenv("FORMAT"), "flowed"))
+			out = plain.Render(input, flowed)
 		case convert.Calendar:
 			out = calendar.Convert(input)
 		}
