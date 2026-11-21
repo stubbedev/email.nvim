@@ -495,7 +495,7 @@ describe("e2e: scrolling near the end of the list loads the next batch", functio
     eq(nil, seen[message.id])
     seen[message.id] = true
   end
-  require("email.async").run(require("email.actions").load_list)
+  require("email.async").run(require("email.actions").reload)
   wait("a refresh keeps every loaded message", function()
     return state.busy == 0 and #state.threads == total
   end)
@@ -713,6 +713,57 @@ describe("e2e: smart folders are saved searches above the accounts, with unread 
   eq({}, errors)
 end)
 
+describe("e2e: a conversation read in an unread folder stays listed until the folder changes", function()
+  require("email.ui.layout").close()
+  state.config.searches = { { name = "Unread", query = "tag:unread" } }
+  write(
+    mail .. "/acct/INBOX/new/1011.x,U=11",
+    "From: Fresh <f@example.org>\nTo: me@example.com\nSubject: Fresh one\nMessage-ID: <fresh@example.org>\n"
+      .. "Date: Thu, 19 Nov 2026 13:00:00 +0000\n\nnew\n"
+  )
+  assert(vim.system({ "notmuch", "new", "--quiet" }):wait().code == 0)
+  state.folder = nil
+  vim.cmd("Email")
+  wait("the unread folder", function()
+    return state.busy == 0 and state.folder.smart and #state.threads > 0
+  end)
+  local function row_of(subject)
+    for i, subj in ipairs(subjects()) do
+      if subj == subject then
+        return i
+      end
+    end
+  end
+  local count = #state.threads
+  focus_row(assert(row_of("Fresh one")))
+  keys("<CR>")
+  wait("reader", function()
+    return state.current ~= nil and state.busy == 0
+  end)
+  keys("q")
+  require("email.async").run(require("email.actions").reload)
+  wait("the reloaded list", function()
+    return state.busy == 0
+  end)
+  eq(count, #state.threads)
+  local row = assert(row_of("Fresh one"), "the read conversation left the list")
+  eq(nil, state.threads[row].tags.unread)
+
+  vim.api.nvim_set_current_win(state.win.list)
+  keys("<S-l>")
+  wait("the next folder", function()
+    return state.busy == 0 and state.folder.smart == nil
+  end)
+  keys("<S-h>")
+  wait("the unread folder again", function()
+    return state.busy == 0 and state.folder.smart
+  end)
+  eq(nil, row_of("Fresh one"))
+  eq(count - 1, #state.threads)
+  state.config.searches = {}
+  eq({}, errors)
+end)
+
 describe("e2e: signatures, the attach picker, an HTML alternative and undo send", function()
   require("email.ui.layout").close()
   local account = state.config.accounts[1]
@@ -828,8 +879,24 @@ describe("e2e: quitting the full layout exits Neovim when nothing else is open, 
   cmd.edit(named)
   open_and_quit()
   eq(1, quits)
-  vim.cmd = cmd
   vim.api.nvim_buf_delete(vim.fn.bufnr(named), { force = true })
+  cmd("Email")
+  wait("list", function()
+    return state.win.list ~= nil and vim.api.nvim_win_is_valid(state.win.list) and state.busy == 0
+  end)
+  local notification = vim.api.nvim_open_win(
+    vim.api.nvim_create_buf(false, true),
+    false,
+    { relative = "editor", row = 0, col = 0, width = 10, height = 1, focusable = false }
+  )
+  vim.api.nvim_set_current_win(state.win.sidebar)
+  keys("q")
+  eq(2, quits)
+  eq(nil, state.win.list)
+  vim.cmd = cmd
+  if vim.api.nvim_win_is_valid(notification) then
+    vim.api.nvim_win_close(notification, true)
+  end
   state.config.layout = "float"
   eq({}, errors)
 end)

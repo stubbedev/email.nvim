@@ -26,6 +26,7 @@ function M.open(search, open_first)
   end
   if search then
     state.folder, state.threads, state.total, state.exhausted = { search = search }, {}, nil, false
+    state.kept = {}
   end
   async.run(function()
     actions.reload()

@@ -4,6 +4,7 @@ state.exhausted = false
 state.pages = {}
 state.threads = {}
 state.marked = {}
+state.kept = {}
 state.unread = {}
 state.reading = false
 state.win = {}

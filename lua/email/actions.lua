@@ -57,8 +57,29 @@ M.descriptions = {
   discard = "Discard",
 }
 
-local function query()
+local function folder_query()
   return state.folder.search or state.folder.query
+end
+
+local function query()
+  local ids = vim.tbl_keys(state.kept)
+  if #ids == 0 then
+    return folder_query()
+  end
+  table.sort(ids)
+  local terms = { "(" .. folder_query() .. ")" }
+  for _, id in ipairs(ids) do
+    terms[#terms + 1] = 'id:"' .. id:gsub('"', '""') .. '"'
+  end
+  return table.concat(terms, " or ")
+end
+
+local function keep_visible(threads)
+  for _, thread in ipairs(threads) do
+    for _, id in ipairs(thread.message_ids) do
+      state.kept[id] = true
+    end
+  end
 end
 
 function M.refresh_counts()
@@ -90,7 +111,7 @@ function M.prefetch()
   local limit = state.config.page_size
   engine.prefetch(queries, limit)
   for _, q in ipairs(queries) do
-    if q ~= query() then
+    if q ~= folder_query() then
       local threads, revision = engine.page(q, limit)
       if threads and layout.is_open() then
         state.pages[q] = { revision = revision, limit = limit, threads = threads, exhausted = #threads < limit }
@@ -267,6 +288,7 @@ local function toggle_tag(tag)
     any = any or thread.tags[tag] == true
   end
   local change = (any and "-" or "+") .. tag
+  keep_visible(threads)
   engine.tag(ids, { change })
   if reading() then
     state.current.tags[tag] = not any or nil
@@ -321,6 +343,7 @@ local function show(thread)
     end
   end
   if #unread > 0 then
+    keep_visible({ thread })
     engine.tag(unread, { "-unread" })
     for _, entry in ipairs(entries) do
       entry.message.tags.unread = nil
@@ -340,7 +363,7 @@ end
 local function set_folder(folder)
   state.folder = folder
   state.threads, state.total, state.exhausted = {}, nil, false
-  state.marked = {}
+  state.marked, state.kept = {}, {}
   if state.reading then
     layout.close_reader()
   end
@@ -381,6 +404,9 @@ local function relocate(ids, threads, action, folder, label)
   local affected = {}
   for _, thread in ipairs(threads) do
     affected[thread.id] = true
+  end
+  for _, id in ipairs(ids) do
+    state.kept[id] = nil
   end
   local keep = neighbour(affected)
   local undo
