@@ -193,13 +193,19 @@ function M.resize()
   end
 end
 
+local function tiled(tab)
+  return vim.tbl_filter(function(win)
+    return vim.api.nvim_win_get_config(win).relative == ""
+  end, vim.api.nvim_tabpage_list_wins(tab))
+end
+
 local function close_window(win)
   if not valid(win) then
     return
   end
   local tab = vim.api.nvim_win_get_tabpage(win)
   local last_tab = #vim.api.nvim_list_tabpages() == 1
-  local last_in_tab = #vim.api.nvim_tabpage_list_wins(tab) == 1
+  local last_in_tab = #tiled(tab) == 1
   if full() and last_tab and last_in_tab then
     vim.api.nvim_win_set_buf(win, vim.api.nvim_create_buf(true, false))
     vim.wo[win].winbar = ""
@@ -215,7 +221,7 @@ local function wipe(buf)
 end
 
 local function holds_nothing_else()
-  if #vim.api.nvim_list_tabpages() > 1 or #vim.api.nvim_tabpage_list_wins(0) > 1 then
+  if #vim.api.nvim_list_tabpages() > 1 or #tiled(0) > 1 then
     return false
   end
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -249,7 +255,7 @@ function M.close()
   end
   wipe(reader_buf)
   reader_buf = nil
-  state.win, state.buf, state.reading, state.current = {}, {}, false, nil
+  state.win, state.buf, state.reading, state.current, state.kept = {}, {}, false, nil, {}
   state.thread, state.sections = nil, nil
   bars = {}
   vim.api.nvim_clear_autocmds({ group = group })
@@ -278,7 +284,7 @@ local function watch()
 end
 
 local function empty_tab()
-  local wins = vim.api.nvim_tabpage_list_wins(0)
+  local wins = tiled(0)
   if #wins ~= 1 then
     return false
   end
