@@ -25,7 +25,7 @@ and updates the index, and builds and sends mail over SMTP. Nothing but notmuch 
   Links show only their label; the URL rides on the text as a terminal hyperlink (OSC 8), so you click the label, and
   wrapping follows what you see. `gx` or a mouse click opens the link: while the message window has focus,
   email.nvim turns on Neovim's mouse in normal mode (if it was off) and restores it when you leave.
-- Reply, reply all, forward (with attachments) and drafts in a normal buffer. `:w` saves a draft, `<C-s>` sends.
+- Reply, reply all, forward (with attachments) and drafts in a normal buffer. `:w` saves a draft, `<leader>ms` sends.
 - Sending goes **straight to the account's SMTP server** (STARTTLS or TLS, PLAIN or LOGIN auth, the password from a
   command), with an optional delay you can undo. Sent mail carries an HTML alternative made from the Markdown you
   wrote. A copy is filed in the account's Sent folder and indexed at once.
